@@ -5,6 +5,7 @@ const {
     proposeMeal,
     startVotingPhase,
     castVote,
+    undoVote,
     completeVotingSession,
     getVotingSession,
     getGroupActiveVotingSessions,
@@ -288,6 +289,21 @@ router.get('/sessions/:sessionId', async (req, res) => {
     }
 });
 
+/**
+ * DELETE /voting/sessions/:sessionId/proposals/:proposalId/vote
+ * Undo vote for a meal proposal
+ * Body: { voterId }
+ */
+router.delete('/sessions/:sessionId/proposals/:proposalId/vote', async (req, res) => {
+    try {
+        const { voterId } = req.body;
+        if (!voterId) return res.status(400).json({ error: 'Missing required field: voterId is required' });
+        const result = await undoVote(req.params.sessionId, req.params.proposalId, voterId);
+        res.json(result);
+    } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+});
 
 
 module.exports = router;

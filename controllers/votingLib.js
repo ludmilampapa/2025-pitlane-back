@@ -372,6 +372,49 @@ async function castVote(votingSessionId, mealProposalId, voterId, voteType = 'up
 }
 
 /**
+ * Undo a vote for a meal proposal
+ */
+async function undoVote(votingSessionId, mealProposalId, voterId) {
+    const votingSession = await prisma.votingSession.findUnique({
+        where: { VotingSessionID: parseInt(votingSessionId) },
+    });
+
+    if (!votingSession) throw new Error('Voting session not found');
+    if (votingSession.status !== 'voting_phase') throw new Error('Voting is not currently active');
+
+    const existingVote = await prisma.vote.findFirst({
+        where: {
+            votingSessionId: parseInt(votingSessionId),
+            mealProposalId: parseInt(mealProposalId),
+            voterId,
+            isActive: true,
+        },
+    });
+
+    if (!existingVote) throw new Error('Active vote not found');
+
+    await prisma.vote.update({
+        where: { VoteID: existingVote.VoteID },
+        data: { isActive: false },
+    });
+
+    const voteCount = await prisma.vote.count({
+        where: {
+            mealProposalId: parseInt(mealProposalId),
+            voteType: 'up',
+            isActive: true,
+        },
+    });
+
+    await prisma.mealProposal.update({
+        where: { MealProposalID: parseInt(mealProposalId) },
+        data: { voteCount },
+    });
+
+    return { success: true, voteCount };
+}
+
+/**
  * Complete voting session and determine winner
  */
 async function completeVotingSession(votingSessionId) {
@@ -1208,6 +1251,7 @@ module.exports = {
     proposeMeal,
     startVotingPhase,
     castVote,
+    undoVote,
     completeVotingSession,
     getVotingSession,
     getGroupActiveVotingSessions,
