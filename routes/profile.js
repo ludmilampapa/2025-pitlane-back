@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { updateCalorieGoal, getCalorieProgress } = require('../controllers/profilesLib');
 const BadgesLibrary = require('../controllers/badgesLib');
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
 
 const profilesController = require('../controllers/profilesLib');
 const authenticateJWT = require('./auth');
