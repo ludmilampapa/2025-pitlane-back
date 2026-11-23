@@ -39,22 +39,25 @@ app.use((req, res, next) => {
   return next();
 });
 
-// Strict CORS allowlist
-const allowedOrigins = new Set(
-  [
-    process.env.FRONTEND_URL,
-    ...(isProduction
-      ? []
-      : [
-          'http://localhost:3000',
-          'http://127.0.0.1:3000',
-          'https://localhost:3000',
-          'https://127.0.0.1:3000',
-        ]),
-  ]
-    .filter(Boolean)
-    .map((u) => u.replace(/\/$/, ''))
-);
+// Strict CORS allowlist (supports comma-separated FRONTEND_URL + this project's Vercel deployment URLs)
+const envOrigins = (process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((u) => u.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+
+const allowedOrigins = new Set([
+  ...envOrigins,
+  ...(isProduction
+    ? []
+    : [
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'https://localhost:3000',
+        'https://127.0.0.1:3000',
+      ]),
+]);
+
+const PROJECT_VERCEL_ORIGIN = /^https:\/\/(quecomemos-front|2025-pitlane-front)(-[a-z0-9-]+)?\.vercel\.app$/;
 
 app.use(
   cors({
@@ -62,7 +65,7 @@ app.use(
       // Allow non-browser / same-origin server-to-server requests with no Origin header
       if (!origin) return callback(null, true);
       const normalized = origin.replace(/\/$/, '');
-      if (allowedOrigins.has(normalized)) {
+      if (allowedOrigins.has(normalized) || PROJECT_VERCEL_ORIGIN.test(normalized)) {
         return callback(null, true);
       }
       if (!isProduction && (normalized.startsWith('http://localhost:') || normalized.startsWith('http://127.0.0.1:'))) {
