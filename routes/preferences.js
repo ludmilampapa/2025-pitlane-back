@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
+const authenticateJWT = require('./auth');
 
 // GET /preferences - get all preferences
 router.get('/', async (req, res) => {
@@ -12,8 +13,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /preferences - create a new preference
-router.post('/', async (req, res) => {
+// POST /preferences - create a new preference (authenticated)
+router.post('/', authenticateJWT, async (req, res) => {
   try {
     const { name } = req.body;
     const preference = await prisma.preference.create({ data: { name } });
@@ -29,8 +30,8 @@ router.post('/', async (req, res) => {
 
 module.exports = router;
 
-// DELETE /preferences/:id - delete a preference by id
-router.delete('/:id', async (req, res) => {
+// DELETE /preferences/:id - delete a preference by id (authenticated)
+router.delete('/:id', authenticateJWT, async (req, res) => {
   try {
     const prisma = require('../lib/prisma');
     const deleted = await prisma.preference.delete({ where: { PreferenceID: parseInt(req.params.id) } });

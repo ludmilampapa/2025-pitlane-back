@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
+const authenticateJWT = require('./auth');
 
 // GET /dietary-restrictions - get all dietary restrictions
 router.get('/', async (req, res) => {
@@ -28,8 +29,8 @@ router.get('/excluding-for-everyone', async (req, res) => {
   }
 });
 
-// POST /dietary-restrictions - create a new dietary restriction
-router.post('/', async (req, res) => {
+// POST /dietary-restrictions - create a new dietary restriction (authenticated)
+router.post('/', authenticateJWT, async (req, res) => {
   try {
     const { name } = req.body;
     const restriction = await prisma.dietaryRestriction.create({ data: { name } });
@@ -45,8 +46,8 @@ router.post('/', async (req, res) => {
 
 module.exports = router;
 
-// DELETE /dietary-restrictions/:id - delete a dietary restriction by id
-router.delete('/:id', async (req, res) => {
+// DELETE /dietary-restrictions/:id - delete a dietary restriction by id (authenticated)
+router.delete('/:id', authenticateJWT, async (req, res) => {
   try {
     const prisma = require('../lib/prisma');
     const deleted = await prisma.dietaryRestriction.delete({ where: { DietaryRestrictionID: parseInt(req.params.id) } });
