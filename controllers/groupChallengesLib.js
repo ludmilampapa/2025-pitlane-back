@@ -1,5 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 function dayStart(value) {
   const date = new Date(value);
@@ -138,18 +137,22 @@ async function getChallengeRanking(challengeId, requesterId) {
     include: { profile: { select: { id: true, username: true } } },
   });
   const totalDays = daysBetween(challenge.startDate, challenge.endDate);
-  const ranking = await Promise.all(members.map(async (member) => {
-    const completedDays = await prisma.groupChallengeCompletion.count({
-      where: { challengeId: challenge.ChallengeID, profileId: member.profileId, completed: true },
-    });
+  const counts = await prisma.groupChallengeCompletion.groupBy({
+    by: ['profileId'],
+    where: { challengeId: challenge.ChallengeID, completed: true },
+    _count: { _all: true },
+  });
+  const countByProfile = new Map(counts.map((row) => [row.profileId, row._count._all]));
+  const ranking = members.map((member) => {
+    const completedDays = countByProfile.get(member.profileId) || 0;
     return {
       profileId: member.profileId,
       username: member.profile.username,
       completedDays,
       totalDays,
-      percentage: totalDays ? Math.round(completedDays * 100 / totalDays) : 0,
+      percentage: totalDays ? Math.round((completedDays * 100) / totalDays) : 0,
     };
-  }));
+  });
   ranking.sort((a, b) => b.percentage - a.percentage || b.completedDays - a.completedDays || a.username?.localeCompare(b.username || '') || 0);
   return ranking;
 }

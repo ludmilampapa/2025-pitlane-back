@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /dietary-restrictions - get all dietary restrictions
 router.get('/', async (req, res) => {
@@ -49,8 +48,7 @@ module.exports = router;
 // DELETE /dietary-restrictions/:id - delete a dietary restriction by id
 router.delete('/:id', async (req, res) => {
   try {
-    const { PrismaClient } = require('@prisma/client');
-    const prisma = new PrismaClient();
+    const prisma = require('../lib/prisma');
     const deleted = await prisma.dietaryRestriction.delete({ where: { DietaryRestrictionID: parseInt(req.params.id) } });
     res.json({ success: true });
   } catch (err) {

@@ -1,6 +1,5 @@
 // controllers/foodsLib.js
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 async function getAllFoods() {
     return prisma.food.findMany({
@@ -218,10 +217,16 @@ async function createFood({ name, svgLink, kCal = 0, preferences = [], dietaryRe
 
     // Handle dietary restrictions
     let finalRestrictions = [];
-    if (!hasNoRestrictions && dietaryRestrictions.length > 0) {
-        finalRestrictions = dietaryRestrictions;
+    const cleanedRestrictions = Array.isArray(dietaryRestrictions)
+        ? dietaryRestrictions.filter((id) => id !== 0 && id !== null && id !== undefined)
+        : [];
+    if (!hasNoRestrictions && cleanedRestrictions.length > 0) {
+        finalRestrictions = cleanedRestrictions;
     } else {
-        finalRestrictions = [0];
+        const noneRestriction = await prisma.dietaryRestriction.findUnique({
+            where: { DietaryRestrictionID: 0 },
+        });
+        finalRestrictions = noneRestriction ? [0] : [];
     }
     // If hasNoRestrictions is true, we leave finalRestrictions empty
     // This means the food has no dietary restrictions and is available to everyone

@@ -1,6 +1,5 @@
 // controllers/profilesLib.js
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient(); // Declaración única de prisma
+const prisma = require('../lib/prisma');
 
 async function getAllProfiles() {
     return prisma.profile.findMany({

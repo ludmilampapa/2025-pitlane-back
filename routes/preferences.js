@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // GET /preferences - get all preferences
 router.get('/', async (req, res) => {
@@ -33,8 +32,7 @@ module.exports = router;
 // DELETE /preferences/:id - delete a preference by id
 router.delete('/:id', async (req, res) => {
   try {
-    const { PrismaClient } = require('@prisma/client');
-    const prisma = new PrismaClient();
+    const prisma = require('../lib/prisma');
     const deleted = await prisma.preference.delete({ where: { PreferenceID: parseInt(req.params.id) } });
     res.json({ success: true });
   } catch (err) {

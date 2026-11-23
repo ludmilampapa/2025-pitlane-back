@@ -1,87 +1,99 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3005;
+const isProduction = process.env.NODE_ENV === 'production';
 
 const routes = require('./routes');
 
-// Configure CORS to allow requests from the frontend
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'https://localhost:3000',
-  'https://127.0.0.1:3000'
-];
+app.disable('x-powered-by');
 
-// Add environment-specific origins
-if (process.env.FRONTEND_URL) {
-  allowedOrigins.push(process.env.FRONTEND_URL);
-}
-
-app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, Postman, curl requests)
-    if (!origin) {
-      return callback(null, true);
-    }
-    
-    // For production/deployment, be more permissive
-    if (process.env.NODE_ENV === 'production') {
-      return callback(null, true);
-    }
-    
-    // Check if origin is in allowed list
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    
-    // Allow any localhost or 127.0.0.1 origin for development
-    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-      return callback(null, true);
-    }
-    
-    // Allow Vercel deployments
-    if (origin.includes('vercel.app')) {
-      return callback(null, true);
-    }
-    
-    // If none of the above, allow it anyway (for now)
-    callback(null, true);
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-  credentials: true,
-  preflightContinue: false,
-  optionsSuccessStatus: 200
-}));
-
-// Handle preflight requests explicitly
+// Security headers
 app.use((req, res, next) => {
-  if (req.method === 'OPTIONS') {
-    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS,PATCH');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Access-Control-Max-Age', '3600');
-    
-    return res.sendStatus(200);
-  }
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   next();
 });
 
-app.use(express.json());
-app.use('/', routes);
+// Lightweight in-memory rate limiter (300 requests / 60s per IP)
+const rateBuckets = new Map();
+const RATE_WINDOW_MS = 60 * 1000;
+const RATE_MAX_REQUESTS = 300;
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') return next();
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const bucket = rateBuckets.get(ip);
+  if (!bucket || now > bucket.resetAt) {
+    rateBuckets.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return next();
+  }
+  bucket.count += 1;
+  if (bucket.count > RATE_MAX_REQUESTS) {
+    res.setHeader('Retry-After', Math.ceil((bucket.resetAt - now) / 1000));
+    return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+  }
+  return next();
+});
+
+// Strict CORS allowlist
+const allowedOrigins = new Set(
+  [
+    process.env.FRONTEND_URL,
+    ...(isProduction
+      ? []
+      : [
+          'http://localhost:3000',
+          'http://127.0.0.1:3000',
+          'https://localhost:3000',
+          'https://127.0.0.1:3000',
+        ]),
+  ]
+    .filter(Boolean)
+    .map((u) => u.replace(/\/$/, ''))
+);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Allow non-browser / same-origin server-to-server requests with no Origin header
+      if (!origin) return callback(null, true);
+      const normalized = origin.replace(/\/$/, '');
+      if (allowedOrigins.has(normalized)) {
+        return callback(null, true);
+      }
+      if (!isProduction && (normalized.startsWith('http://localhost:') || normalized.startsWith('http://127.0.0.1:'))) {
+        return callback(null, true);
+      }
+      return callback(new Error('Not allowed by CORS'));
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    credentials: true,
+    optionsSuccessStatus: 200,
+  })
+);
+
+app.use(express.json({ limit: '100kb' }));
 
 app.get('/', (req, res) => {
   res.send('Backend is running!');
 });
 
-// Add a test endpoint without authentication
-app.get('/test-cors', (req, res) => {
-  res.json({ 
-    message: 'CORS test successful!', 
-    origin: req.headers.origin,
-    timestamp: new Date().toISOString()
+app.use('/', routes);
+
+// Global error handler (avoids leaking stack traces in production)
+app.use((err, req, res, next) => {
+  if (err && err.message === 'Not allowed by CORS') {
+    return res.status(403).json({ error: 'Origin not allowed' });
+  }
+  console.error('Unhandled error:', err);
+  return res.status(500).json({
+    error: 'Internal server error',
+    ...(isProduction ? {} : { details: err?.message }),
   });
 });
 

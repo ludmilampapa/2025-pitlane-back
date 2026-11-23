@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const authenticateJWT = require('./auth');
 const foodsRouter = require('./foods');
 const profilesRouter = require('./profile');
 const mealsRouter = require('./meals');
@@ -13,16 +14,19 @@ const challengesRouter = require('./challenges');
 const preferencesRouter = require('./preferences');
 const dietaryRestrictionsRouter = require('./dietaryRestrictions');
 
-router.use('/foods', foodsRouter);
-router.use('/profile', profilesRouter);
-router.use('/meals', mealsRouter);
-router.use('/groups', groupsRouter);
-router.use('/consumptions', consumptionsRouter);
-router.use('/voting', votingRouter);
-router.use('/voting/history', votingHistoryRouter);
-router.use('/badges', badgesRouter);
+// Read-only master catalogs
 router.use('/preferences', preferencesRouter);
 router.use('/dietary-restrictions', dietaryRestrictionsRouter);
-router.use('/', challengesRouter);
+
+// Authenticated application endpoints
+router.use('/foods', authenticateJWT, foodsRouter);
+router.use('/profile', profilesRouter); // profile.js already applies authenticateJWT per route
+router.use('/meals', authenticateJWT, mealsRouter);
+router.use('/groups', authenticateJWT, groupsRouter);
+router.use('/consumptions', authenticateJWT, consumptionsRouter);
+router.use('/voting', authenticateJWT, votingRouter);
+router.use('/voting/history', authenticateJWT, votingHistoryRouter);
+router.use('/badges', authenticateJWT, badgesRouter);
+router.use('/', authenticateJWT, challengesRouter);
 
 module.exports = router;

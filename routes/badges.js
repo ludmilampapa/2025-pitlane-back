@@ -173,8 +173,7 @@ router.post('/award-retroactive/:profileId', async (req, res) => {
     console.log(`Starting retroactive badge check for user: ${profileId}`);
 
     // Import Prisma client to check user's past actions
-    const { PrismaClient } = require('@prisma/client');
-    const prisma = new PrismaClient();
+    const prisma = require('../lib/prisma');
 
     // Check for group creation badge
     const groupsCreated = await prisma.group.count({
