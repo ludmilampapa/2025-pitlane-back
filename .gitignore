@@ -24,3 +24,7 @@ github-*.zip
 /generated/prisma
 .env
 node_modules
+
+# Ignore markdown docs except root README.md
+*.md
+!/README.md
