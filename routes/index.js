@@ -10,6 +10,7 @@ const votingRouter = require('./voting');
 const votingHistoryRouter = require('./votingHistory');
 const badgesRouter = require('./badges');
 const challengesRouter = require('./challenges');
+const notificationsRouter = require('./notifications');
 
 const preferencesRouter = require('./preferences');
 const dietaryRestrictionsRouter = require('./dietaryRestrictions');
@@ -27,6 +28,7 @@ router.use('/consumptions', authenticateJWT, consumptionsRouter);
 router.use('/voting', authenticateJWT, votingRouter);
 router.use('/voting/history', authenticateJWT, votingHistoryRouter);
 router.use('/badges', authenticateJWT, badgesRouter);
+router.use('/notifications', authenticateJWT, notificationsRouter);
 router.use('/', authenticateJWT, challengesRouter);
 
 module.exports = router;
