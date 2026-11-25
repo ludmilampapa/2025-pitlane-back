@@ -103,7 +103,7 @@ async function setCompletion(challengeId, profileId, dateValue, completed) {
   });
 }
 
-async function getChallengeProgress(challengeId, profileId) {
+async function getChallengeProgress(challengeId, profileId, clientDate) {
   const challenge = await prisma.groupChallenge.findUnique({ where: { ChallengeID: parseInt(challengeId) } });
   if (!challenge) throw new Error('CHALLENGE_NOT_FOUND');
   await requireMember(challenge.groupId, profileId);
@@ -112,7 +112,10 @@ async function getChallengeProgress(challengeId, profileId) {
     orderBy: { date: 'desc' },
   });
   const completedDates = completions.map((completion) => completion.date.toISOString().slice(0, 10));
-  const today = dayStart(new Date()).toISOString().slice(0, 10);
+  const today =
+    typeof clientDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(clientDate.trim())
+      ? clientDate.trim()
+      : dayStart(new Date()).toISOString().slice(0, 10);
   const completionSet = new Set(completedDates);
   let streak = 0;
   let cursor = dayStart(today);

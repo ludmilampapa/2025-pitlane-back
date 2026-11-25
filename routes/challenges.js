@@ -40,7 +40,7 @@ router.post('/challenges/:challengeId/completions', async (req, res) => {
 });
 
 router.get('/challenges/:challengeId/progress/:profileId', async (req, res) => {
-  try { res.json(await lib.getChallengeProgress(req.params.challengeId, actorId(req))); }
+  try { res.json(await lib.getChallengeProgress(req.params.challengeId, actorId(req), req.query.date)); }
   catch (error) { res.status(errorStatus(error)).json({ error: error.message }); }
 });
 
