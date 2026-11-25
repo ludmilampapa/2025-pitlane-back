@@ -45,24 +45,10 @@ async function startVotingSession(initiatorId, groupId, title = null, descriptio
             description,
             proposalEndsAt,
             status: 'proposal_phase'
-        },
-        include: {
-            group: {
-                select: {
-                    GroupID: true,
-                    name: true
-                }
-            },
-            initiator: {
-                select: {
-                    id: true,
-                    username: true
-                }
-            }
         }
     });
 
-    return votingSession;
+    return getVotingSession(votingSession.VotingSessionID);
 }
 
 /**
