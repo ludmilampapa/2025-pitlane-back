@@ -1,6 +1,7 @@
 const prisma = require('../lib/prisma');
 const votingHistoryLib = require('./votingHistoryLib');
 const BadgesLibrary = require('./badgesLib');
+const { isMealCompatible } = require('../lib/dietaryCompatibility');
 
 /**
  * Start a new voting session for a group
@@ -189,7 +190,86 @@ async function proposeMeal(votingSessionId, mealId, proposedById) {
 }
 
 /**
- * Transition voting session from proposal to voting phase
+ * Populate random group-compatible meal proposals when a voting session enters voting_phase
+ * without manual or swipe proposals.
+ */
+async function seedRandomProposalsIfEmpty(votingSession, count = 5) {
+    const groupInfo = await prisma.group.findUnique({
+        where: { GroupID: votingSession.groupId },
+        include: {
+            members: {
+                where: { isActive: true },
+                include: {
+                    profile: {
+                        include: {
+                            DietaryRestriction: true
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    const activeRestrictionsMap = new Map();
+    if (groupInfo?.members) {
+        groupInfo.members.forEach(member => {
+            (member.profile?.DietaryRestriction || []).forEach(r => {
+                if (r.DietaryRestrictionID && r.DietaryRestrictionID !== 0) {
+                    activeRestrictionsMap.set(r.DietaryRestrictionID, r);
+                }
+            });
+        });
+    }
+
+    const allMeals = await prisma.meal.findMany({
+        include: {
+            mealFoods: {
+                include: {
+                    food: {
+                        include: {
+                            dietaryRestrictions: true
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    if (allMeals.length === 0) {
+        throw new Error('Cannot start voting: no meals exist in the catalog yet');
+    }
+
+    const activeRestrictions = Array.from(activeRestrictionsMap.values());
+    const candidatePool = activeRestrictions.length > 0
+        ? allMeals.filter(meal => isMealCompatible(meal, activeRestrictions))
+        : allMeals;
+
+    if (candidatePool.length === 0) {
+        throw new Error('No meals in the catalog match all dietary restrictions of this group');
+    }
+
+    // Fisher-Yates shuffle
+    const shuffled = [...candidatePool];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
+    const selected = shuffled.slice(0, Math.min(count, shuffled.length));
+
+    await prisma.mealProposal.createMany({
+        data: selected.map(meal => ({
+            votingSessionId: votingSession.VotingSessionID,
+            mealId: meal.MealID,
+            proposedById: votingSession.initiatorId
+        })),
+        skipDuplicates: true
+    });
+}
+
+/**
+ * Transition voting session from proposal to voting phase.
+ * If no meals were proposed manually or via swipe, auto-seeds random compatible meals.
  */
 async function startVotingPhase(votingSessionId) {
     const votingSession = await prisma.votingSession.findUnique({
@@ -210,55 +290,21 @@ async function startVotingPhase(votingSessionId) {
     }
 
     if (votingSession.proposals.length === 0) {
-        throw new Error('Cannot start voting with no meal proposals');
+        await seedRandomProposalsIfEmpty(votingSession, 5);
     }
 
     // Set voting to end in 10 minutes (adjustable)
     const votingEndsAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    const updatedSession = await prisma.votingSession.update({
+    await prisma.votingSession.update({
         where: { VotingSessionID: parseInt(votingSessionId) },
         data: {
             status: 'voting_phase',
             votingEndsAt
-        },
-        include: {
-            proposals: {
-                where: { isActive: true },
-                include: {
-                    meal: {
-                        include: {
-                            profile: {
-                                select: {
-                                    id: true,
-                                    username: true
-                                }
-                            },
-                            mealFoods: {
-                                include: {
-                                    food: {
-                                        select: {
-                                            FoodID: true,
-                                            name: true,
-                                            kCal: true
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    proposedBy: {
-                        select: {
-                            id: true,
-                            username: true
-                        }
-                    }
-                }
-            }
         }
     });
 
-    return updatedSession;
+    return getVotingSession(votingSessionId);
 }
 
 /**

@@ -15,7 +15,7 @@ function actorId(req) {
 }
 
 router.get('/groups/:groupId/challenges', async (req, res) => {
-  try { res.json(await lib.listChallenges(req.params.groupId)); }
+  try { res.json(await lib.listChallenges(req.params.groupId, actorId(req))); }
   catch (error) { res.status(errorStatus(error)).json({ error: error.message }); }
 });
 

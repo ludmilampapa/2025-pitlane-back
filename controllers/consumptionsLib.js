@@ -1,5 +1,6 @@
 // controllers/consumptionsLib.js
 const prisma = require('../lib/prisma');
+const { isMealCompatible } = require('../lib/dietaryCompatibility');
 
 /**
  * Get all consumptions with filters
@@ -839,12 +840,13 @@ async function getGroupFilteredMeals(groupId) {
         allDietaryRestrictions.push(...member.profile.DietaryRestriction);
     });
 
-    // Remove duplicates
+    // Remove duplicates and ignore universal "For Everyone" (ID 0)
     const uniqueDietaryRestrictions = allDietaryRestrictions.filter((restriction, index, self) =>
+        restriction.DietaryRestrictionID !== 0 &&
+        !(restriction.name && restriction.name.toLowerCase().includes('everyone')) &&
         index === self.findIndex(r => r.DietaryRestrictionID === restriction.DietaryRestrictionID)
     );
 
-    // Get meals that don't violate any group member's dietary restrictions
     const restrictionIds = uniqueDietaryRestrictions.map(r => r.DietaryRestrictionID);
     
     // Get all meals and filter them based on their foods' dietary restrictions
@@ -872,15 +874,11 @@ async function getGroupFilteredMeals(groupId) {
         }
     });
 
-    // Filter meals based on dietary restrictions
-    const filteredMeals = allMeals.filter(meal => {
-        // Check if any food in the meal has a restriction that conflicts with group members
-        return !meal.mealFoods.some(mealFood => 
-            mealFood.food.dietaryRestrictions.some(restriction => 
-                restrictionIds.includes(restriction.DietaryRestrictionID)
-            )
-        );
-    });
+    // A meal is safe for the group iff EVERY ingredient satisfies both tag rules and allergen rules
+    // for every active restriction in the group.
+    const filteredMeals = uniqueDietaryRestrictions.length === 0
+        ? allMeals
+        : allMeals.filter(meal => isMealCompatible(meal, uniqueDietaryRestrictions));
 
     return {
         groupId: groupInfo.GroupID,

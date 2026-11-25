@@ -1,5 +1,6 @@
 // controllers/mealsLib.js
 const prisma = require('../lib/prisma');
+const { isMealCompatible } = require('../lib/dietaryCompatibility');
 
 async function getAllMealsWithProfiles() {
     return prisma.meal.findMany({
@@ -322,28 +323,33 @@ async function getRecommendedMealsForProfile(profileId) {
     if (!profile) return null;
 
     const userRestrictions = profile.DietaryRestriction.map(r => r.DietaryRestrictionID);
+    const userPreferences = profile.Preference.map(p => p.PreferenceID);
     
-    // Base query to find meals that contain foods matching user preferences
-    const baseQuery = {
-        where: {
-            AND: [
-                // Match meals that contain foods with user preferences
-                {
-                    mealFoods: {
-                        some: {
-                            food: {
-                                preferences: { 
-                                    some: { 
-                                        PreferenceID: { 
-                                            in: profile.Preference.map(p => p.PreferenceID) 
-                                        } 
-                                    } 
-                                }
-                            }
+    const andConditions = [];
+
+    // If user configured taste preferences, match meals containing at least one preferred food
+    if (userPreferences.length > 0) {
+        andConditions.push({
+            mealFoods: {
+                some: {
+                    food: {
+                        preferences: { 
+                            some: { 
+                                PreferenceID: { 
+                                    in: userPreferences 
+                                } 
+                            } 
                         }
                     }
                 }
-            ]
+            }
+        });
+    }
+
+    // Base query to find meals matching user tastes & restrictions
+    const baseQuery = {
+        where: {
+            AND: andConditions
         },
         include: {
             mealFoods: {
@@ -416,7 +422,8 @@ async function getRecommendedMealsForProfile(profileId) {
         }
     });
     
-    return prisma.meal.findMany(baseQuery);
+    const candidates = await prisma.meal.findMany(baseQuery);
+    return candidates.filter(meal => isMealCompatible(meal, profile.DietaryRestriction));
 }
 
 async function getMealsByProfile(profileId) {

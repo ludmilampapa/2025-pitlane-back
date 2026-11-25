@@ -170,7 +170,6 @@ router.post('/award-retroactive/:profileId', async (req, res) => {
       return res.status(400).json({ error: 'profileId is required' });
     }
 
-    console.log(`Starting retroactive badge check for user: ${profileId}`);
 
     // Import Prisma client to check user's past actions
     const prisma = require('../lib/prisma');
@@ -182,7 +181,6 @@ router.post('/award-retroactive/:profileId', async (req, res) => {
         isActive: true 
       }
     });
-    console.log(`User created ${groupsCreated} groups`);
     if (groupsCreated > 0) {
       const groupBadgeResult = await BadgesLibrary.checkAndAwardBadges(profileId, 'group_created');
       results.push({ action: 'group_created', count: groupsCreated, result: groupBadgeResult });
@@ -192,7 +190,6 @@ router.post('/award-retroactive/:profileId', async (req, res) => {
     const mealsCreated = await prisma.meal.count({
       where: { profileId: profileId }
     });
-    console.log(`User created ${mealsCreated} meals`);
     if (mealsCreated > 0) {
       const mealBadgeResult = await BadgesLibrary.checkAndAwardBadges(profileId, 'meal_created');
       results.push({ action: 'meal_created', count: mealsCreated, result: mealBadgeResult });
@@ -205,7 +202,6 @@ router.post('/award-retroactive/:profileId', async (req, res) => {
         isActive: true
       }
     });
-    console.log(`User participated in ${votesParticipated} votes`);
     if (votesParticipated > 0) {
       const votingBadgeResult = await BadgesLibrary.checkAndAwardBadges(profileId, 'voting_participated');
       results.push({ action: 'voting_participated', count: votesParticipated, result: votingBadgeResult });
@@ -224,13 +220,10 @@ router.post('/award-retroactive/:profileId', async (req, res) => {
         }
       }
     });
-    console.log(`User won ${votingSessions} voting sessions`);
     if (votingSessions > 0) {
       const winnerBadgeResult = await BadgesLibrary.checkAndAwardBadges(profileId, 'voting_won');
       results.push({ action: 'voting_won', count: votingSessions, result: winnerBadgeResult });
     }
-
-    await prisma.$disconnect();
 
     // Collect all newly earned badges
     const allNewlyEarnedBadges = results

@@ -60,6 +60,32 @@ router.get('/user/:profileId', async (req, res) => {
 });
 
 /**
+ * GET /consumptions/stats
+ * Get consumption statistics
+ */
+router.get('/stats', async (req, res) => {
+    try {
+        const { profileId, groupId, startDate, endDate } = req.query;
+        
+        const filters = {};
+        if (profileId) filters.profileId = profileId;
+        if (groupId) filters.groupId = groupId;
+        if (startDate) filters.startDate = startDate;
+        if (endDate) filters.endDate = endDate;
+        
+        const stats = await consumptionsLib.getConsumptionStats(filters);
+        
+        res.json(stats);
+    } catch (error) {
+        console.error('Error fetching consumption stats:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch consumption stats',
+            details: error.message 
+        });
+    }
+});
+
+/**
  * GET /consumptions/:id
  * Get a specific consumption by ID
  */
@@ -89,14 +115,6 @@ router.get('/:id', async (req, res) => {
 router.post('/individual', async (req, res) => {
     try {
         const { name, description, meals, profileId, consumedAt, portions } = req.body;
-        
-        console.log('[POST /consumptions/individual] Received request:', {
-            name,
-            profileId,
-            mealsCount: meals?.length,
-            hasPortions: !!portions,
-            portionsData: portions
-        });
         
         if (!name || !profileId || !meals) {
             return res.status(400).json({ 
@@ -134,15 +152,6 @@ router.post('/individual', async (req, res) => {
 router.post('/group', async (req, res) => {
     try {
         const { name, description, meals, profileId, groupId, consumedAt, portions } = req.body;
-        
-        console.log('[POST /consumptions/group] Received request:', {
-            name,
-            profileId,
-            groupId,
-            mealsCount: meals?.length,
-            hasPortions: !!portions,
-            portionsData: portions
-        });
         
         if (!name || !profileId || !groupId || !meals) {
             return res.status(400).json({ 
@@ -251,32 +260,6 @@ router.delete('/:id', async (req, res) => {
         
         res.status(500).json({ 
             error: 'Failed to delete consumption',
-            details: error.message 
-        });
-    }
-});
-
-/**
- * GET /consumptions/stats
- * Get consumption statistics
- */
-router.get('/stats', async (req, res) => {
-    try {
-        const { profileId, groupId, startDate, endDate } = req.query;
-        
-        const filters = {};
-        if (profileId) filters.profileId = profileId;
-        if (groupId) filters.groupId = groupId;
-        if (startDate) filters.startDate = startDate;
-        if (endDate) filters.endDate = endDate;
-        
-        const stats = await consumptionsLib.getConsumptionStats(filters);
-        
-        res.json(stats);
-    } catch (error) {
-        console.error('Error fetching consumption stats:', error);
-        res.status(500).json({ 
-            error: 'Failed to fetch consumption stats',
             details: error.message 
         });
     }
