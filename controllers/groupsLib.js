@@ -37,12 +37,17 @@ async function getAllGroups() {
                         where: {
                             isActive: true
                         }
+                    },
+                    consumptions: {
+                        where: {
+                            isActive: true
+                        }
                     }
                 }
             }
         },
         orderBy: {
-            createdAt: 'desc'
+            updatedAt: 'desc'
         }
     });
 }
@@ -94,12 +99,17 @@ async function getUserGroups(profileId) {
                         where: {
                             isActive: true
                         }
+                    },
+                    consumptions: {
+                        where: {
+                            isActive: true
+                        }
                     }
                 }
             }
         },
         orderBy: {
-            createdAt: 'desc'
+            updatedAt: 'desc'
         }
     });
 }
@@ -652,39 +662,64 @@ async function respondToInvitation(invitationId, userId, response) {
     }
 
     const status = response === 'accept' ? 'accepted' : 'rejected';
-    
-    // Update invitation status
-    const updatedInvitation = await prisma.groupInvitation.update({
-        where: {
-            InvitationID: parseInt(invitationId)
-        },
-        data: {
-            status,
-            respondedAt: new Date()
-        },
-        include: {
-            group: {
-                select: {
-                    GroupID: true,
-                    name: true,
-                    description: true
-                }
+
+    // Atomically update invitation status and, if accepted, add ONLY the invited user to THIS group
+    return prisma.$transaction(async (tx) => {
+        const updatedInvitation = await tx.groupInvitation.update({
+            where: {
+                InvitationID: invitation.InvitationID
             },
-            invitedBy: {
-                select: {
-                    id: true,
-                    username: true
+            data: {
+                status,
+                respondedAt: new Date()
+            },
+            include: {
+                group: {
+                    select: {
+                        GroupID: true,
+                        name: true,
+                        description: true
+                    }
+                },
+                invitedBy: {
+                    select: {
+                        id: true,
+                        username: true
+                    }
                 }
             }
+        });
+
+        if (response === 'accept') {
+            const existingMember = await tx.groupMember.findUnique({
+                where: {
+                    groupId_profileId: {
+                        groupId: invitation.groupId,
+                        profileId: invitation.invitedUserId
+                    }
+                }
+            });
+
+            if (existingMember) {
+                if (!existingMember.isActive) {
+                    await tx.groupMember.update({
+                        where: { GroupMemberID: existingMember.GroupMemberID },
+                        data: { isActive: true, role: 'member', joinedAt: new Date() }
+                    });
+                }
+            } else {
+                await tx.groupMember.create({
+                    data: {
+                        groupId: invitation.groupId,
+                        profileId: invitation.invitedUserId,
+                        role: 'member'
+                    }
+                });
+            }
         }
+
+        return updatedInvitation;
     });
-
-    // If accepted, add user to group
-    if (response === 'accept') {
-        await addGroupMember(invitation.groupId, userId, 'member');
-    }
-
-    return updatedInvitation;
 }
 
 /**

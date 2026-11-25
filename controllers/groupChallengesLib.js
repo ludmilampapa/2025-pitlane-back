@@ -1,6 +1,9 @@
 const prisma = require('../lib/prisma');
 
 function dayStart(value) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return new Date(`${value.trim()}T00:00:00.000Z`);
+  }
   const date = new Date(value);
   date.setUTCHours(0, 0, 0, 0);
   return date;
@@ -31,7 +34,8 @@ async function requireAdmin(groupId, profileId) {
   return membership;
 }
 
-async function listChallenges(groupId) {
+async function listChallenges(groupId, requesterId) {
+  await requireMember(groupId, requesterId);
   return prisma.groupChallenge.findMany({
     where: { groupId: parseInt(groupId), isActive: true },
     include: { createdBy: { select: { id: true, username: true } } },
@@ -163,10 +167,45 @@ async function listMenu(groupId, requesterId, weekStart) {
   const day = start.getUTCDay();
   const mondayOffset = day === 0 ? -6 : 1 - day;
   start.setUTCDate(start.getUTCDate() + mondayOffset);
-  const end = dayStart(start); end.setUTCDate(end.getUTCDate() + 6);
+  const end = dayStart(start);
+  end.setUTCDate(end.getUTCDate() + 6);
+
+  const mealInclude = {
+    include: {
+      mealFoods: {
+        include: {
+          food: {
+            select: {
+              FoodID: true,
+              name: true,
+              kCal: true,
+              dietaryRestrictions: true,
+            },
+          },
+        },
+      },
+    },
+  };
+
   return prisma.groupMenuEntry.findMany({
-    where: { groupId: parseInt(groupId), isActive: true, date: { gte: start, lte: end } },
-    include: { meal: true, createdBy: { select: { id: true, username: true } }, proposals: { include: { proposedBy: { select: { id: true, username: true } }, proposedMeal: true, reviewedBy: { select: { id: true, username: true } } }, orderBy: { createdAt: 'desc' } } },
+    where: {
+      groupId: parseInt(groupId),
+      isActive: true,
+      moment: { in: ['breakfast', 'lunch', 'dinner'] },
+      date: { gte: start, lte: end },
+    },
+    include: {
+      meal: mealInclude,
+      createdBy: { select: { id: true, username: true } },
+      proposals: {
+        include: {
+          proposedBy: { select: { id: true, username: true } },
+          proposedMeal: mealInclude,
+          reviewedBy: { select: { id: true, username: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      },
+    },
     orderBy: [{ date: 'asc' }, { moment: 'asc' }],
   });
 }
@@ -174,17 +213,42 @@ async function listMenu(groupId, requesterId, weekStart) {
 async function createMenuEntry(groupId, requesterId, data) {
   await requireAdmin(groupId, requesterId);
   if (!data.date || !data.moment) throw new Error('INVALID_MENU_DATA');
+  if (!['breakfast', 'lunch', 'dinner'].includes(data.moment)) {
+    throw new Error('INVALID_MENU_MOMENT');
+  }
   if (!data.mealId && !data.customMeal?.trim()) throw new Error('INVALID_MENU_MEAL');
   if (data.mealId) {
     const meal = await prisma.meal.findUnique({ where: { MealID: parseInt(data.mealId) } });
     if (!meal) throw new Error('MEAL_NOT_FOUND');
   }
-  return prisma.groupMenuEntry.create({
-    data: {
-      groupId: parseInt(groupId), date: dayStart(data.date), moment: data.moment,
-      mealId: data.mealId ? parseInt(data.mealId) : null,
-      customMeal: data.customMeal?.trim() || null,
+
+  const parsedGroupId = parseInt(groupId);
+  const parsedDate = dayStart(data.date);
+  const parsedMealId = data.mealId ? parseInt(data.mealId) : null;
+  const parsedCustomMeal = parsedMealId ? null : data.customMeal?.trim() || null;
+
+  return prisma.groupMenuEntry.upsert({
+    where: {
+      groupId_date_moment: {
+        groupId: parsedGroupId,
+        date: parsedDate,
+        moment: data.moment,
+      },
+    },
+    update: {
+      mealId: parsedMealId,
+      customMeal: parsedCustomMeal,
       createdById: requesterId,
+      isActive: true,
+    },
+    create: {
+      groupId: parsedGroupId,
+      date: parsedDate,
+      moment: data.moment,
+      mealId: parsedMealId,
+      customMeal: parsedCustomMeal,
+      createdById: requesterId,
+      isActive: true,
     },
   });
 }

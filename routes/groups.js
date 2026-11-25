@@ -6,19 +6,16 @@ const BadgesLibrary = require('../controllers/badgesLib');
 
 /**
  * GET /groups
- * Get all groups or user's groups
+ * Get the authenticated user's groups (groups are private and invite-only)
  */
 router.get('/', async (req, res) => {
     try {
-        const { userId } = req.query;
-        
-        let groups;
-        if (userId) {
-            groups = await groupsLib.getUserGroups(userId);
-        } else {
-            groups = await groupsLib.getAllGroups();
+        const userId = req.user?.sub;
+        if (!userId) {
+            return res.status(401).json({ error: 'Authentication required' });
         }
-        
+
+        const groups = await groupsLib.getUserGroups(userId);
         res.json(groups);
     } catch (error) {
         console.error('Error fetching groups:', error);

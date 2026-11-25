@@ -11,7 +11,6 @@ router.get('/groups/:groupId', async (req, res) => {
     const { groupId } = req.params;
     const { limit = 10, offset = 0 } = req.query;
 
-    console.log('[Voting History] Getting history for group:', groupId);
 
     const history = await votingHistoryLib.getGroupVotingHistory(
       groupId,
@@ -19,7 +18,6 @@ router.get('/groups/:groupId', async (req, res) => {
       parseInt(offset)
     );
 
-    console.log('[Voting History] Found sessions:', history.sessions?.length || 0);
 
     res.json(history);
   } catch (error) {

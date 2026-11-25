@@ -1,5 +1,6 @@
 // controllers/foodsLib.js
 const prisma = require('../lib/prisma');
+const { violatesRestrictionByName } = require('../lib/dietaryCompatibility');
 
 async function getAllFoods() {
     return prisma.food.findMany({
@@ -215,21 +216,30 @@ async function createFood({ name, svgLink, kCal = 0, preferences = [], dietaryRe
         throw new Error('kCal cannot be less than 0');
     }
 
-    // Handle dietary restrictions
+    // Handle dietary restrictions:
+    // - If explicit restrictions were selected, validate against allergen conflicts and connect them.
+    // - If hasNoRestrictions ("For Everyone") is true, connect all catalog restrictions that this food genuinely satisfies.
     let finalRestrictions = [];
+    const allCatalogRestrictions = await prisma.dietaryRestriction.findMany();
     const cleanedRestrictions = Array.isArray(dietaryRestrictions)
         ? dietaryRestrictions.filter((id) => id !== 0 && id !== null && id !== undefined)
         : [];
+
     if (!hasNoRestrictions && cleanedRestrictions.length > 0) {
-        finalRestrictions = cleanedRestrictions;
-    } else {
-        const noneRestriction = await prisma.dietaryRestriction.findUnique({
-            where: { DietaryRestrictionID: 0 },
+        finalRestrictions = cleanedRestrictions.filter((id) => {
+            const found = allCatalogRestrictions.find((r) => r.DietaryRestrictionID === id);
+            return found ? !violatesRestrictionByName(name, found.name) : true;
         });
-        finalRestrictions = noneRestriction ? [0] : [];
+    } else if (hasNoRestrictions) {
+        finalRestrictions = allCatalogRestrictions
+            .filter(
+                (r) =>
+                    r.DietaryRestrictionID !== 0 &&
+                    !r.name.toLowerCase().includes('everyone') &&
+                    !violatesRestrictionByName(name, r.name)
+            )
+            .map((r) => r.DietaryRestrictionID);
     }
-    // If hasNoRestrictions is true, we leave finalRestrictions empty
-    // This means the food has no dietary restrictions and is available to everyone
 
     // Validate that all preference IDs exist
     if (preferences.length > 0) {

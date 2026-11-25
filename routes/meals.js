@@ -74,44 +74,27 @@ router.get('/:id', async (req, res) => {
 // POST /meals - Create a new meal
 router.post('/', async (req, res) => {
     try {
-        console.log('=== MEAL CREATION DEBUG ===');
-        console.log('Full request body:', JSON.stringify(req.body, null, 2));
         
         const { name, description, profileId, foodIds, mealFoods } = req.body;
         
-        console.log('Extracted values:');
-        console.log('- name:', name);
-        console.log('- profileId:', profileId);
-        console.log('- foodIds:', foodIds);
-        console.log('- mealFoods:', mealFoods);
         
         // Support both new format (mealFoods with quantities) and old format (foodIds)
         const mealData = mealFoods || foodIds;
         
-        console.log('Using mealData:', mealData);
         
         if (!name || !profileId || !mealData || !Array.isArray(mealData) || mealData.length === 0) {
-            console.log('Validation failed:');
-            console.log('- name present:', !!name);
-            console.log('- profileId present:', !!profileId);
-            console.log('- mealData present:', !!mealData);
-            console.log('- mealData is array:', Array.isArray(mealData));
-            console.log('- mealData length:', mealData?.length);
             
             return res.status(400).json({ 
                 error: 'Name, profileId, and at least one food item are required. Use either "mealFoods" (with quantities) or "foodIds" (legacy format).' 
             });
         }
 
-        console.log('Creating meal with data:', mealData);
         const meal = await mealsLib.createMeal(name, description, profileId, mealData);
-        console.log('Meal created successfully:', meal.MealID);
         
         // Award badge for creating a meal
         try {
             const badgeResult = await BadgesLibrary.checkAndAwardBadges(profileId, 'meal_created');
             if (badgeResult.success && badgeResult.newlyEarnedBadges.length > 0) {
-                console.log(`User ${profileId} earned ${badgeResult.newlyEarnedBadges.length} new badge(s) for creating a meal!`);
                 meal.newBadges = badgeResult.newlyEarnedBadges;
             }
         } catch (badgeError) {

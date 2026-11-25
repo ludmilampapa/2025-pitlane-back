@@ -28,9 +28,10 @@ router.get('/:id', authenticateJWT, async (req, res) => {
     
     // Check and award badges retroactively on first profile access
     try {
-      console.log(`Profile accessed for user: ${req.params.id} - Running retroactive badge check`);
-      const retroactiveResult = await BadgesLibrary.checkRetroactiveBadges(req.params.id);
-      console.log('Retroactive badge result:', retroactiveResult);
+      // Only for the owner: never trigger badge writes while viewing someone else's profile
+      if (req.params.id === req.user?.sub) {
+        await BadgesLibrary.checkRetroactiveBadges(req.params.id);
+      }
     } catch (badgeError) {
       console.error('Error in retroactive badge check:', badgeError);
       // Don't fail profile request if badge check fails
