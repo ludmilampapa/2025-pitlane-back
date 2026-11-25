@@ -82,14 +82,24 @@ router.post('/', async (req, res) => {
         const mealData = mealFoods || foodIds;
         
         
-        if (!name || !profileId || !mealData || !Array.isArray(mealData) || mealData.length === 0) {
+        if (!name || typeof name !== 'string' || !name.trim() || !profileId || !mealData || !Array.isArray(mealData) || mealData.length === 0) {
             
             return res.status(400).json({ 
                 error: 'Name, profileId, and at least one food item are required. Use either "mealFoods" (with quantities) or "foodIds" (legacy format).' 
             });
         }
 
-        const meal = await mealsLib.createMeal(name, description, profileId, mealData);
+        if (Array.isArray(mealFoods)) {
+            const hasInvalidItem = mealFoods.some(
+                (item) => !item || !Number.isInteger(Number(item.foodId)) || Number(item.foodId) <= 0 ||
+                    (item.quantity !== undefined && (!Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0))
+            );
+            if (hasInvalidItem) {
+                return res.status(400).json({ error: 'Each mealFood must have a valid foodId and a positive quantity' });
+            }
+        }
+
+        const meal = await mealsLib.createMeal(name.trim(), description, profileId, mealData);
         
         // Award badge for creating a meal
         try {

@@ -91,11 +91,23 @@ router.get('/:id', async (req, res) => {
     }
 });
 
+function validateFoodFields({ name, kCal }, { partial = false } = {}) {
+    if ((!partial || name !== undefined) && (!name || typeof name !== 'string' || !name.trim())) {
+        return partial ? 'Food name cannot be empty' : 'Food name is required';
+    }
+    if ((!partial || kCal !== undefined) && (kCal === undefined || kCal === null || !Number.isFinite(Number(kCal)) || Number(kCal) < 0 || Number(kCal) > 10000)) {
+        return 'kCal must be a number between 0 and 10000';
+    }
+    return null;
+}
+
 // PUT /foods/:id - update a food by id
 router.put('/:id', async (req, res) => {
     try {
         const { name, svgLink, kCal, preferences, dietaryRestrictions } = req.body;
-        const updatedFood = await foodsController.updateFood(req.params.id, { name, svgLink, kCal, preferences, dietaryRestrictions });
+        const validationError = validateFoodFields({ name, kCal }, { partial: true });
+        if (validationError) return res.status(400).json({ error: validationError });
+        const updatedFood = await foodsController.updateFood(req.params.id, { name: name?.trim(), svgLink, kCal, preferences, dietaryRestrictions });
         if (!updatedFood) return res.status(404).json({ error: 'Food not found' });
         res.json(updatedFood);
     } catch (err) {
@@ -121,8 +133,10 @@ router.post('/', async (req, res) => {
         if (!profileId) {
             return res.status(400).json({ error: 'profileId is required' });
         }
+        const validationError = validateFoodFields({ name, kCal });
+        if (validationError) return res.status(400).json({ error: validationError });
 
-        const food = await foodsController.createFood({ name, svgLink, kCal, preferences, dietaryRestrictions, hasNoRestrictions, profileId });
+        const food = await foodsController.createFood({ name: name.trim(), svgLink, kCal: Number(kCal), preferences, dietaryRestrictions, hasNoRestrictions, profileId });
         res.status(201).json(food);
     } catch (err) {
         if (err.code === 'P2002') {

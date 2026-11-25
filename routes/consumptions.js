@@ -2,6 +2,34 @@
 const express = require('express');
 const router = express.Router();
 const consumptionsLib = require('../controllers/consumptionsLib');
+const { isValidDateInput, parseArgentinaFilterDate } = require('../lib/timezone');
+
+function validateDateRange(startDate, endDate) {
+    if (startDate && !isValidDateInput(String(startDate))) {
+        return 'Invalid startDate';
+    }
+    if (endDate && !isValidDateInput(String(endDate))) {
+        return 'Invalid endDate';
+    }
+    if (startDate && endDate) {
+        const start = parseArgentinaFilterDate(String(startDate), 'start');
+        const end = parseArgentinaFilterDate(String(endDate), 'end');
+        if (start > end) return 'startDate must be on or before endDate';
+    }
+    return null;
+}
+
+function validateConsumptionBody({ name, profileId, groupId, meals, consumedAt }, { requireGroupId = false } = {}) {
+    if (!name || typeof name !== 'string' || !name.trim() || !profileId || (requireGroupId && !groupId) || !Array.isArray(meals) || meals.length === 0) {
+        return requireGroupId
+            ? 'Name, profileId, groupId, and at least one meal are required'
+            : 'Name, profileId, and at least one meal are required';
+    }
+    if (consumedAt !== undefined && consumedAt !== null && !isValidDateInput(consumedAt)) {
+        return 'Invalid consumedAt date';
+    }
+    return null;
+}
 
 /**
  * GET /consumptions
@@ -10,6 +38,8 @@ const consumptionsLib = require('../controllers/consumptionsLib');
 router.get('/', async (req, res) => {
     try {
         const { profileId, groupId, type, startDate, endDate } = req.query;
+        const rangeError = validateDateRange(startDate, endDate);
+        if (rangeError) return res.status(400).json({ error: rangeError });
         
         const filters = {};
         if (profileId) filters.profileId = profileId;
@@ -38,6 +68,8 @@ router.get('/user/:profileId', async (req, res) => {
     try {
         const { profileId } = req.params;
         const { type, startDate, endDate } = req.query;
+        const rangeError = validateDateRange(startDate, endDate);
+        if (rangeError) return res.status(400).json({ error: rangeError });
         
         const filters = { 
             profileId,
@@ -115,11 +147,9 @@ router.get('/:id', async (req, res) => {
 router.post('/individual', async (req, res) => {
     try {
         const { name, description, meals, profileId, consumedAt, portions } = req.body;
-        
-        if (!name || !profileId || !meals) {
-            return res.status(400).json({ 
-                error: 'Name, profileId, and meals are required' 
-            });
+        const bodyError = validateConsumptionBody(req.body);
+        if (bodyError) {
+            return res.status(400).json({ error: bodyError });
         }
         
         const consumptionData = { name, description, meals, consumedAt, portions };
@@ -152,11 +182,9 @@ router.post('/individual', async (req, res) => {
 router.post('/group', async (req, res) => {
     try {
         const { name, description, meals, profileId, groupId, consumedAt, portions } = req.body;
-        
-        if (!name || !profileId || !groupId || !meals) {
-            return res.status(400).json({ 
-                error: 'Name, profileId, groupId, and meals are required' 
-            });
+        const bodyError = validateConsumptionBody(req.body, { requireGroupId: true });
+        if (bodyError) {
+            return res.status(400).json({ error: bodyError });
         }
         
         const consumptionData = { name, description, meals, groupId, consumedAt, portions };

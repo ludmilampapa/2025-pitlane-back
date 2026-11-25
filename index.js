@@ -1,4 +1,5 @@
 require('dotenv').config();
+process.env.TZ = process.env.TZ || 'America/Argentina/Buenos_Aires';
 const express = require('express');
 const cors = require('cors');
 const app = express();

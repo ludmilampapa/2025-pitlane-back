@@ -6,6 +6,7 @@ const prisma = require('../lib/prisma');
 
 const profilesController = require('../controllers/profilesLib');
 const authenticateJWT = require('./auth');
+const { isValidDateInput } = require('../lib/timezone');
 
 // GET /profile - get all profiles (protegido)
 router.get('/', authenticateJWT, async (req, res) => {
@@ -326,12 +327,12 @@ router.put('/:id/calorie-goal', authenticateJWT, async (req, res) => {
   const { calorieGoal } = req.body;
   const userId = req.params.id;
 
-  if (!calorieGoal) {
-    return res.status(400).json({ error: 'Missing calorieGoal' });
-  }
-
   try {
-    const updatedProfile = await updateCalorieGoal(userId, calorieGoal);
+    const parsedGoal = Number(calorieGoal);
+    if (calorieGoal === undefined || calorieGoal === null || !Number.isFinite(parsedGoal) || parsedGoal < 500 || parsedGoal > 10000) {
+      return res.status(400).json({ error: 'calorieGoal must be a number between 500 and 10000' });
+    }
+    const updatedProfile = await updateCalorieGoal(userId, Math.round(parsedGoal));
     res.json(updatedProfile);
   } catch (error) {
     console.error('Error updating calorie goal:', error);
@@ -345,7 +346,10 @@ router.get('/:id/calorie-progress', authenticateJWT, async (req, res) => {
   const userId = req.params.id;
 
   try {
-    const progress = await getCalorieProgress(userId, date ? new Date(date) : new Date());
+    if (date !== undefined && date !== '' && !isValidDateInput(String(date))) {
+      return res.status(400).json({ error: 'Invalid date parameter' });
+    }
+    const progress = await getCalorieProgress(userId, date ? String(date) : new Date());
     res.json(progress);
   } catch (error) {
     console.error('Error fetching calorie progress:', error);

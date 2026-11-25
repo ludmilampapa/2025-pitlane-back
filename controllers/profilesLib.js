@@ -1,5 +1,6 @@
 // controllers/profilesLib.js
 const prisma = require('../lib/prisma');
+const { getArgentinaDayBounds } = require('../lib/timezone');
 
 async function getAllProfiles() {
     return prisma.profile.findMany({
@@ -158,13 +159,8 @@ const getCalorieProgress = async (userId, date = new Date()) => {
       where: { id: userId },
     });
 
-    // Crear fechas de inicio y fin del día para filtrar consumptions del día específico
-    const targetDate = new Date(date);
-    const startOfDay = new Date(targetDate);
-    startOfDay.setHours(0, 0, 0, 0);
-    
-    const endOfDay = new Date(targetDate);
-    endOfDay.setHours(23, 59, 59, 999);
+    // Crear fechas de inicio y fin del día en horario Argentina (UTC-3)
+    const { ymd, startUtc: startOfDay, endUtc: endOfDay } = getArgentinaDayBounds(date);
 
     // Obtener solo las consumptions del día específico
     const consumptions = await prisma.consumption.findMany({
@@ -251,7 +247,7 @@ const getCalorieProgress = async (userId, date = new Date()) => {
     return {
       consumed, // Total de calorías consumidas en el día específico
       goal,     // Objetivo diario de calorías
-      date: targetDate.toISOString().split('T')[0] // Fecha del progreso en formato YYYY-MM-DD
+      date: ymd // Fecha del progreso en formato YYYY-MM-DD (Argentina)
     };
   } catch (error) {
     console.error('Error in getCalorieProgress:', error);

@@ -1,12 +1,8 @@
 const prisma = require('../lib/prisma');
+const { argentinaDateToUtcMidnight, getArgentinaYMD } = require('../lib/timezone');
 
 function dayStart(value) {
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
-    return new Date(`${value.trim()}T00:00:00.000Z`);
-  }
-  const date = new Date(value);
-  date.setUTCHours(0, 0, 0, 0);
-  return date;
+  return argentinaDateToUtcMidnight(value);
 }
 
 function daysBetween(startDate, endDate) {
@@ -115,7 +111,7 @@ async function getChallengeProgress(challengeId, profileId, clientDate) {
   const today =
     typeof clientDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(clientDate.trim())
       ? clientDate.trim()
-      : dayStart(new Date()).toISOString().slice(0, 10);
+      : getArgentinaYMD(new Date());
   const completionSet = new Set(completedDates);
   let streak = 0;
   let cursor = dayStart(today);

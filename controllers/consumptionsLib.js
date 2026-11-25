@@ -1,6 +1,15 @@
 // controllers/consumptionsLib.js
 const prisma = require('../lib/prisma');
 const { isMealCompatible } = require('../lib/dietaryCompatibility');
+const { parseArgentinaFilterDate } = require('../lib/timezone');
+
+function buildConsumedAtFilter(startDate, endDate) {
+    if (!startDate && !endDate) return undefined;
+    const filter = {};
+    if (startDate) filter.gte = parseArgentinaFilterDate(startDate, 'start');
+    if (endDate) filter.lte = parseArgentinaFilterDate(endDate, 'end');
+    return filter;
+}
 
 /**
  * Get all consumptions with filters
@@ -29,14 +38,9 @@ async function getConsumptions(filters = {}) {
         whereClause.type = type;
     }
 
-    if (startDate || endDate) {
-        whereClause.consumedAt = {};
-        if (startDate) {
-            whereClause.consumedAt.gte = new Date(startDate);
-        }
-        if (endDate) {
-            whereClause.consumedAt.lte = new Date(endDate);
-        }
+    const consumedAtFilter = buildConsumedAtFilter(startDate, endDate);
+    if (consumedAtFilter) {
+        whereClause.consumedAt = consumedAtFilter;
     }
 
     return prisma.consumption.findMany({
@@ -774,14 +778,9 @@ async function getConsumptionStats(filters = {}) {
         whereClause.groupId = parseInt(groupId);
     }
 
-    if (startDate || endDate) {
-        whereClause.consumedAt = {};
-        if (startDate) {
-            whereClause.consumedAt.gte = new Date(startDate);
-        }
-        if (endDate) {
-            whereClause.consumedAt.lte = new Date(endDate);
-        }
+    const consumedAtFilter = buildConsumedAtFilter(startDate, endDate);
+    if (consumedAtFilter) {
+        whereClause.consumedAt = consumedAtFilter;
     }
 
     const stats = await prisma.consumption.aggregate({

@@ -2,6 +2,7 @@ const prisma = require('../lib/prisma');
 const votingHistoryLib = require('./votingHistoryLib');
 const BadgesLibrary = require('./badgesLib');
 const { isMealCompatible } = require('../lib/dietaryCompatibility');
+const { formatArgentinaDate } = require('../lib/timezone');
 
 /**
  * Start a new voting session for a group
@@ -41,7 +42,7 @@ async function startVotingSession(initiatorId, groupId, title = null, descriptio
         data: {
             groupId: parseInt(groupId),
             initiatorId,
-            title: title || `Meal Vote - ${new Date().toLocaleDateString()}`,
+            title: title || `Meal Vote - ${formatArgentinaDate(new Date())}`,
             description,
             proposalEndsAt,
             status: 'proposal_phase'
