@@ -139,16 +139,43 @@ function consumptionMatchesPausedFoods(consumption, pausedFoods) {
   const needles = pausedFoods.map((p) => String(p).trim().toLowerCase()).filter(Boolean);
   if (needles.length === 0) return false;
 
-  const texts = [];
+  const consumedTexts = [];
+  const skippedFoodNames = new Set();
+
   for (const cm of consumption.consumptionMeals || []) {
-    if (cm.meal?.name) texts.push(cm.meal.name);
-    if (cm.meal?.description) texts.push(cm.meal.description);
-    for (const mf of cm.meal?.mealFoods || []) {
-      if (mf.food?.name) texts.push(mf.food.name);
+    if (cm.quantity !== undefined && Number(cm.quantity) <= 0) continue;
+
+    const foodPortions = cm.mealPortion?.foodPortions;
+    if (Array.isArray(foodPortions) && foodPortions.length > 0) {
+      let anyConsumed = false;
+      for (const fp of foodPortions) {
+        const consumedQty = Number(fp.quantityConsumed ?? 0);
+        const consumedFrac = Number(fp.portionFraction ?? 0);
+        const foodName = fp.food?.name || '';
+        if (consumedQty > 0 && consumedFrac > 0) {
+          anyConsumed = true;
+          if (foodName) consumedTexts.push(foodName);
+        } else if (foodName) {
+          skippedFoodNames.add(foodName.toLowerCase());
+        }
+      }
+      if (!anyConsumed) continue;
+    } else {
+      if (cm.mealPortion && Number(cm.mealPortion.portionFraction) <= 0) continue;
+      if (cm.meal?.name) consumedTexts.push(cm.meal.name);
+      if (cm.meal?.description) consumedTexts.push(cm.meal.description);
+      for (const mf of cm.meal?.mealFoods || []) {
+        if (mf.food?.name) consumedTexts.push(mf.food.name);
+      }
     }
   }
-  const haystack = texts.join(' ').toLowerCase();
-  return needles.some((needle) => haystack.includes(needle));
+
+  const haystack = consumedTexts.join(' ').toLowerCase();
+  return needles.some((needle) => {
+    if (!haystack.includes(needle)) return false;
+    // If every match came only from a skipped food name, it won't be in haystack anyway.
+    return true;
+  });
 }
 
 /**
@@ -192,6 +219,13 @@ async function syncChallengeCompletionsForDay(profileId, dateValue = new Date())
           meal: {
             include: {
               mealFoods: {
+                include: { food: true },
+              },
+            },
+          },
+          mealPortion: {
+            include: {
+              foodPortions: {
                 include: { food: true },
               },
             },

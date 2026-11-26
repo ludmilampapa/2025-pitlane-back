@@ -157,4 +157,47 @@ describe('HTTP date & field validation', () => {
     expect(res.body).toHaveLength(1);
     expect(res.body[0].pausedFoods).toEqual(['Soda']);
   });
+
+  test('consumptionMatchesPausedFoods ignores ingredients customized to 0 consumed', () => {
+    const { consumptionMatchesPausedFoods } = jest.requireActual('../controllers/groupChallengesLib');
+    const skippedSoda = {
+      consumptionMeals: [
+        {
+          quantity: 1,
+          meal: {
+            name: 'Burger & Soda Combo',
+            mealFoods: [{ food: { name: 'Burger' } }, { food: { name: 'Soda' } }],
+          },
+          mealPortion: {
+            portionFraction: 0.7,
+            foodPortions: [
+              { quantityConsumed: 1, portionFraction: 1, food: { name: 'Burger' } },
+              { quantityConsumed: 0, portionFraction: 0, food: { name: 'Soda' } },
+            ],
+          },
+        },
+      ],
+    };
+    expect(consumptionMatchesPausedFoods(skippedSoda, ['Soda'])).toBe(false);
+
+    const consumedSoda = {
+      consumptionMeals: [
+        {
+          quantity: 1,
+          meal: {
+            name: 'Burger & Soda Combo',
+            mealFoods: [{ food: { name: 'Burger' } }, { food: { name: 'Soda' } }],
+          },
+          mealPortion: {
+            portionFraction: 1,
+            foodPortions: [
+              { quantityConsumed: 1, portionFraction: 1, food: { name: 'Burger' } },
+              { quantityConsumed: 1, portionFraction: 1, food: { name: 'Soda' } },
+            ],
+          },
+        },
+      ],
+    };
+    expect(consumptionMatchesPausedFoods(consumedSoda, ['Soda'])).toBe(true);
+  });
 });
