@@ -25,6 +25,7 @@ github-*.zip
 .env
 node_modules
 
-# Ignore markdown docs except root README.md
+# Ignore markdown and text docs except root README.md
 *.md
+*.txt
 !/README.md

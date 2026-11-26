@@ -2,6 +2,7 @@
 const prisma = require('../lib/prisma');
 const { isMealCompatible } = require('../lib/dietaryCompatibility');
 const { parseArgentinaFilterDate } = require('../lib/timezone');
+const { syncChallengeCompletionsForDay } = require('./groupChallengesLib');
 
 function buildConsumedAtFilter(startDate, endDate) {
     if (!startDate && !endDate) return undefined;
@@ -355,6 +356,12 @@ async function createIndividualConsumption(consumptionData, profileId) {
         }))
     });
     
+    try {
+        await syncChallengeCompletionsForDay(profileId, consumption.consumedAt);
+    } catch (syncError) {
+        console.error('[createIndividualConsumption] Challenge sync error:', syncError);
+    }
+
     return consumption;
 }
 
@@ -609,6 +616,16 @@ async function createGroupConsumption(consumptionData, profileId) {
         };
     });
 
+    try {
+        await Promise.all(
+            (result.individualConsumptions || []).map((ic) =>
+                syncChallengeCompletionsForDay(ic.profileId, ic.consumedAt)
+            )
+        );
+    } catch (syncError) {
+        console.error('[createGroupConsumption] Challenge sync error:', syncError);
+    }
+
     return result.groupConsumption;
 }
 
@@ -750,7 +767,7 @@ async function deleteConsumption(consumptionId, profileId) {
         throw new Error('Unauthorized to delete this consumption');
     }
 
-    return prisma.consumption.update({
+    const deleted = await prisma.consumption.update({
         where: {
             ConsumptionID: parseInt(consumptionId)
         },
@@ -758,6 +775,14 @@ async function deleteConsumption(consumptionId, profileId) {
             isActive: false
         }
     });
+
+    try {
+        await syncChallengeCompletionsForDay(profileId, existingConsumption.consumedAt);
+    } catch (syncError) {
+        console.error('[deleteConsumption] Challenge sync error:', syncError);
+    }
+
+    return deleted;
 }
 
 /**
