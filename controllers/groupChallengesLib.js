@@ -241,6 +241,9 @@ async function setCompletion(challengeId, profileId, dateValue, completed) {
   const challenge = await prisma.groupChallenge.findUnique({ where: { ChallengeID: parseInt(challengeId) } });
   if (!challenge || !challenge.isActive) throw new Error('CHALLENGE_NOT_FOUND');
   await requireMember(challenge.groupId, profileId);
+  if (Array.isArray(challenge.pausedFoods) && challenge.pausedFoods.length > 0) {
+    throw new Error('INVALID_AUTO_TRACKED_CHALLENGE');
+  }
   const date = dayStart(dateValue || new Date());
   if (date < dayStart(challenge.startDate) || date > dayStart(challenge.endDate)) throw new Error('DATE_OUT_OF_CHALLENGE');
   return prisma.groupChallengeCompletion.upsert({
