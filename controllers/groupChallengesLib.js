@@ -1,5 +1,5 @@
 const prisma = require('../lib/prisma');
-const { argentinaDateToUtcMidnight, getArgentinaYMD } = require('../lib/timezone');
+const { argentinaDateToUtcMidnight, getArgentinaDayBounds, getArgentinaYMD } = require('../lib/timezone');
 
 function dayStart(value) {
   return argentinaDateToUtcMidnight(value);
@@ -134,6 +134,102 @@ async function listActivePausedChallenges(profileId, clientDate) {
   }));
 }
 
+function consumptionMatchesPausedFoods(consumption, pausedFoods) {
+  if (!Array.isArray(pausedFoods) || pausedFoods.length === 0) return false;
+  const needles = pausedFoods.map((p) => String(p).trim().toLowerCase()).filter(Boolean);
+  if (needles.length === 0) return false;
+
+  const texts = [];
+  for (const cm of consumption.consumptionMeals || []) {
+    if (cm.meal?.name) texts.push(cm.meal.name);
+    if (cm.meal?.description) texts.push(cm.meal.description);
+    for (const mf of cm.meal?.mealFoods || []) {
+      if (mf.food?.name) texts.push(mf.food.name);
+    }
+  }
+  const haystack = texts.join(' ').toLowerCase();
+  return needles.some((needle) => haystack.includes(needle));
+}
+
+/**
+ * Automatically evaluates and upserts daily completion for all active challenges
+ * with linked pausedFoods for a user on a given Argentina calendar day.
+ * - Completed = user logged >= 1 active consumption that day AND none match any pausedFood.
+ * - If a later consumption on the same day includes a pausedFood, it automatically unchecks.
+ */
+async function syncChallengeCompletionsForDay(profileId, dateValue = new Date()) {
+  if (!profileId) return [];
+  const { ymd, startUtc, endUtc } = getArgentinaDayBounds(dateValue);
+  const dayDate = dayStart(ymd);
+
+  const memberships = await prisma.groupMember.findMany({
+    where: { profileId, isActive: true },
+    select: { groupId: true },
+  });
+  const groupIds = memberships.map((m) => m.groupId);
+  if (groupIds.length === 0) return [];
+
+  const challenges = await prisma.groupChallenge.findMany({
+    where: {
+      groupId: { in: groupIds },
+      isActive: true,
+      startDate: { lte: dayDate },
+      endDate: { gte: dayDate },
+      pausedFoods: { isEmpty: false },
+    },
+  });
+  if (challenges.length === 0) return [];
+
+  const dayConsumptions = await prisma.consumption.findMany({
+    where: {
+      profileId,
+      isActive: true,
+      consumedAt: { gte: startUtc, lte: endUtc },
+    },
+    include: {
+      consumptionMeals: {
+        include: {
+          meal: {
+            include: {
+              mealFoods: {
+                include: { food: true },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const results = [];
+  for (const challenge of challenges) {
+    const hasLoggedMeal = dayConsumptions.length > 0;
+    const hasPausedMatch = dayConsumptions.some((c) =>
+      consumptionMatchesPausedFoods(c, challenge.pausedFoods)
+    );
+    const completed = hasLoggedMeal && !hasPausedMatch;
+
+    const record = await prisma.groupChallengeCompletion.upsert({
+      where: {
+        challengeId_profileId_date: {
+          challengeId: challenge.ChallengeID,
+          profileId,
+          date: dayDate,
+        },
+      },
+      update: { completed },
+      create: {
+        challengeId: challenge.ChallengeID,
+        profileId,
+        date: dayDate,
+        completed,
+      },
+    });
+    results.push({ challengeId: challenge.ChallengeID, completed: record.completed });
+  }
+  return results;
+}
+
 async function deleteChallenge(challengeId, profileId) {
   const challenge = await prisma.groupChallenge.findUnique({ where: { ChallengeID: parseInt(challengeId) } });
   if (!challenge) throw new Error('CHALLENGE_NOT_FOUND');
@@ -158,15 +254,22 @@ async function getChallengeProgress(challengeId, profileId, clientDate) {
   const challenge = await prisma.groupChallenge.findUnique({ where: { ChallengeID: parseInt(challengeId) } });
   if (!challenge) throw new Error('CHALLENGE_NOT_FOUND');
   await requireMember(challenge.groupId, profileId);
+  const today =
+    typeof clientDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(clientDate.trim())
+      ? clientDate.trim()
+      : getArgentinaYMD(new Date());
+  if (Array.isArray(challenge.pausedFoods) && challenge.pausedFoods.length > 0) {
+    try {
+      await syncChallengeCompletionsForDay(profileId, today);
+    } catch (syncError) {
+      console.error('Error syncing challenge completion:', syncError);
+    }
+  }
   const completions = await prisma.groupChallengeCompletion.findMany({
     where: { challengeId: challenge.ChallengeID, profileId, completed: true },
     orderBy: { date: 'desc' },
   });
   const completedDates = completions.map((completion) => completion.date.toISOString().slice(0, 10));
-  const today =
-    typeof clientDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(clientDate.trim())
-      ? clientDate.trim()
-      : getArgentinaYMD(new Date());
   const completionSet = new Set(completedDates);
   let streak = 0;
   let cursor = dayStart(today);
@@ -278,16 +381,14 @@ async function createMenuEntry(groupId, requesterId, data) {
   await requireAdmin(groupId, requesterId);
   if (!data.date || !data.moment) throw new Error('INVALID_MENU_DATA');
   const moment = normalizeMenuMoment(data.moment);
-  if (!data.mealId && !data.customMeal?.trim()) throw new Error('INVALID_MENU_MEAL');
-  if (data.mealId) {
-    const meal = await prisma.meal.findUnique({ where: { MealID: parseInt(data.mealId) } });
-    if (!meal) throw new Error('MEAL_NOT_FOUND');
-  }
+  if (!data.mealId) throw new Error('INVALID_MENU_MEAL');
+  const parsedMealId = parseInt(data.mealId);
+  if (!Number.isInteger(parsedMealId) || parsedMealId <= 0) throw new Error('INVALID_MENU_MEAL');
+  const meal = await prisma.meal.findUnique({ where: { MealID: parsedMealId } });
+  if (!meal) throw new Error('MEAL_NOT_FOUND');
 
   const parsedGroupId = parseInt(groupId);
   const parsedDate = dayStart(data.date);
-  const parsedMealId = data.mealId ? parseInt(data.mealId) : null;
-  const parsedCustomMeal = parsedMealId ? null : data.customMeal?.trim() || null;
 
   return prisma.groupMenuEntry.upsert({
     where: {
@@ -299,7 +400,7 @@ async function createMenuEntry(groupId, requesterId, data) {
     },
     update: {
       mealId: parsedMealId,
-      customMeal: parsedCustomMeal,
+      customMeal: null,
       createdById: requesterId,
       isActive: true,
     },
@@ -308,7 +409,7 @@ async function createMenuEntry(groupId, requesterId, data) {
       date: parsedDate,
       moment,
       mealId: parsedMealId,
-      customMeal: parsedCustomMeal,
+      customMeal: null,
       createdById: requesterId,
       isActive: true,
     },
@@ -319,13 +420,21 @@ async function updateMenuEntry(entryId, requesterId, data) {
   const entry = await prisma.groupMenuEntry.findUnique({ where: { MenuEntryID: parseInt(entryId) } });
   if (!entry) throw new Error('MENU_ENTRY_NOT_FOUND');
   await requireAdmin(entry.groupId, requesterId);
+  let nextMealId = entry.mealId;
+  if (data.mealId !== undefined) {
+    const parsedMealId = parseInt(data.mealId);
+    if (!Number.isInteger(parsedMealId) || parsedMealId <= 0) throw new Error('INVALID_MENU_MEAL');
+    const meal = await prisma.meal.findUnique({ where: { MealID: parsedMealId } });
+    if (!meal) throw new Error('MEAL_NOT_FOUND');
+    nextMealId = parsedMealId;
+  }
   return prisma.groupMenuEntry.update({
     where: { MenuEntryID: entry.MenuEntryID },
     data: {
       date: data.date ? dayStart(data.date) : entry.date,
       moment: data.moment ? normalizeMenuMoment(data.moment) : entry.moment,
-      mealId: data.mealId ? parseInt(data.mealId) : (Object.prototype.hasOwnProperty.call(data, 'mealId') ? null : entry.mealId),
-      customMeal: data.customMeal !== undefined ? data.customMeal?.trim() || null : entry.customMeal,
+      mealId: nextMealId,
+      customMeal: null,
     },
   });
 }
@@ -352,17 +461,17 @@ async function createProposal(entryId, requesterId, data) {
   const entry = await prisma.groupMenuEntry.findUnique({ where: { MenuEntryID: parseInt(entryId) } });
   if (!entry) throw new Error('MENU_ENTRY_NOT_FOUND');
   await requireMember(entry.groupId, requesterId);
-  if (!data.proposedMealId && !data.alternativeText?.trim()) throw new Error('INVALID_PROPOSAL');
-  if (data.proposedMealId) {
-    const meal = await prisma.meal.findUnique({ where: { MealID: parseInt(data.proposedMealId) } });
-    if (!meal) throw new Error('MEAL_NOT_FOUND');
-  }
+  if (!data.proposedMealId) throw new Error('INVALID_PROPOSAL');
+  const parsedMealId = parseInt(data.proposedMealId);
+  if (!Number.isInteger(parsedMealId) || parsedMealId <= 0) throw new Error('INVALID_PROPOSAL');
+  const meal = await prisma.meal.findUnique({ where: { MealID: parsedMealId } });
+  if (!meal) throw new Error('MEAL_NOT_FOUND');
   return prisma.menuProposal.create({
     data: {
       menuEntryId: entry.MenuEntryID,
       proposedById: requesterId,
-      proposedMealId: data.proposedMealId ? parseInt(data.proposedMealId) : null,
-      alternativeText: data.alternativeText?.trim() || null,
+      proposedMealId: parsedMealId,
+      alternativeText: null,
       reason: data.reason?.trim() || null,
     },
   });
@@ -396,6 +505,7 @@ async function respondProposal(proposalId, requesterId, status) {
 module.exports = {
   listChallenges, createChallenge, updateChallenge, deleteChallenge, setCompletion,
   getChallengeProgress, getChallengeRanking, listActivePausedChallenges,
+  syncChallengeCompletionsForDay, consumptionMatchesPausedFoods,
   listMenu, createMenuEntry, updateMenuEntry, deleteMenuEntry,
   listProposals, createProposal, respondProposal,
 };
