@@ -245,7 +245,7 @@ async function listMenu(groupId, requesterId, weekStart) {
     where: {
       groupId: parseInt(groupId),
       isActive: true,
-      moment: { in: ['breakfast', 'lunch', 'dinner'] },
+      moment: { in: VALID_MENU_MOMENTS },
       date: { gte: start, lte: end },
     },
     include: {
@@ -264,12 +264,20 @@ async function listMenu(groupId, requesterId, weekStart) {
   });
 }
 
+const VALID_MENU_MOMENTS = ['breakfast', 'lunch', 'snack', 'dinner'];
+
+function normalizeMenuMoment(moment) {
+  const normalized = typeof moment === 'string' ? moment.trim().toLowerCase() : '';
+  if (!VALID_MENU_MOMENTS.includes(normalized)) {
+    throw new Error('INVALID_MENU_MOMENT');
+  }
+  return normalized;
+}
+
 async function createMenuEntry(groupId, requesterId, data) {
   await requireAdmin(groupId, requesterId);
   if (!data.date || !data.moment) throw new Error('INVALID_MENU_DATA');
-  if (!['breakfast', 'lunch', 'dinner'].includes(data.moment)) {
-    throw new Error('INVALID_MENU_MOMENT');
-  }
+  const moment = normalizeMenuMoment(data.moment);
   if (!data.mealId && !data.customMeal?.trim()) throw new Error('INVALID_MENU_MEAL');
   if (data.mealId) {
     const meal = await prisma.meal.findUnique({ where: { MealID: parseInt(data.mealId) } });
@@ -286,7 +294,7 @@ async function createMenuEntry(groupId, requesterId, data) {
       groupId_date_moment: {
         groupId: parsedGroupId,
         date: parsedDate,
-        moment: data.moment,
+        moment,
       },
     },
     update: {
@@ -298,7 +306,7 @@ async function createMenuEntry(groupId, requesterId, data) {
     create: {
       groupId: parsedGroupId,
       date: parsedDate,
-      moment: data.moment,
+      moment,
       mealId: parsedMealId,
       customMeal: parsedCustomMeal,
       createdById: requesterId,
@@ -315,7 +323,7 @@ async function updateMenuEntry(entryId, requesterId, data) {
     where: { MenuEntryID: entry.MenuEntryID },
     data: {
       date: data.date ? dayStart(data.date) : entry.date,
-      moment: data.moment || entry.moment,
+      moment: data.moment ? normalizeMenuMoment(data.moment) : entry.moment,
       mealId: data.mealId ? parseInt(data.mealId) : (Object.prototype.hasOwnProperty.call(data, 'mealId') ? null : entry.mealId),
       customMeal: data.customMeal !== undefined ? data.customMeal?.trim() || null : entry.customMeal,
     },
