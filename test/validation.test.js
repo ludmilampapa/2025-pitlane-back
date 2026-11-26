@@ -143,4 +143,18 @@ describe('HTTP date & field validation', () => {
       .send({ name: 'Salad', mealFoods: [{ foodId: 1, quantity: 0 }] });
     expect(badQty.status).toBe(400);
   });
+
+  test('GET /challenges/active-paused calls listActivePausedChallenges for the authenticated user', async () => {
+    const groupChallengesLib = require('../controllers/groupChallengesLib');
+    groupChallengesLib.listActivePausedChallenges.mockResolvedValue([
+      { ChallengeID: 1, name: 'Hydration Week', ruleText: 'No soda', pausedFoods: ['Soda'], groupId: 5, groupName: 'Friends' },
+    ]);
+    const res = await request(app)
+      .get('/challenges/active-paused?date=2026-11-25')
+      .set('Authorization', userToken());
+    expect(res.status).toBe(200);
+    expect(groupChallengesLib.listActivePausedChallenges).toHaveBeenCalledWith(ME, '2026-11-25');
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].pausedFoods).toEqual(['Soda']);
+  });
 });

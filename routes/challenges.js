@@ -14,6 +14,11 @@ function actorId(req) {
   return req.user?.sub;
 }
 
+router.get('/challenges/active-paused', async (req, res) => {
+  try { res.json(await lib.listActivePausedChallenges(actorId(req), req.query.date)); }
+  catch (error) { res.status(errorStatus(error)).json({ error: error.message }); }
+});
+
 router.get('/groups/:groupId/challenges', async (req, res) => {
   try { res.json(await lib.listChallenges(req.params.groupId, actorId(req))); }
   catch (error) { res.status(errorStatus(error)).json({ error: error.message }); }

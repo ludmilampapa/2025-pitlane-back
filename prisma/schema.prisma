@@ -422,6 +422,7 @@ model GroupChallenge {
   name        String
   description String?
   ruleText    String
+  pausedFoods String[] @default([])
   startDate   DateTime
   endDate     DateTime
   isActive    Boolean  @default(true)

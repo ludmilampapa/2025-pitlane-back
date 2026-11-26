@@ -39,6 +39,25 @@ async function listChallenges(groupId, requesterId) {
   });
 }
 
+function normalizePausedFoods(input) {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input)) throw new Error('INVALID_CHALLENGE_DATA');
+  const seen = new Set();
+  const cleaned = [];
+  for (const raw of input) {
+    if (typeof raw !== 'string') continue;
+    const item = raw.trim();
+    if (!item || item.length > 60) continue;
+    const key = item.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      cleaned.push(item);
+    }
+    if (cleaned.length >= 20) break;
+  }
+  return cleaned;
+}
+
 async function createChallenge(groupId, profileId, data) {
   await requireAdmin(groupId, profileId);
   if (!data.name?.trim() || !data.ruleText?.trim() || !data.startDate || !data.endDate) {
@@ -47,12 +66,14 @@ async function createChallenge(groupId, profileId, data) {
   const startDate = dayStart(data.startDate);
   const endDate = dayStart(data.endDate);
   if (endDate < startDate) throw new Error('INVALID_CHALLENGE_DATES');
+  const pausedFoods = normalizePausedFoods(data.pausedFoods);
   return prisma.groupChallenge.create({
     data: {
       groupId: parseInt(groupId),
       name: data.name.trim(),
       description: data.description?.trim() || null,
       ruleText: data.ruleText.trim(),
+      pausedFoods,
       startDate,
       endDate,
       createdById: profileId,
@@ -73,10 +94,44 @@ async function updateChallenge(challengeId, profileId, data) {
       name: data.name?.trim() || challenge.name,
       description: data.description?.trim() ?? challenge.description,
       ruleText: data.ruleText?.trim() || challenge.ruleText,
+      pausedFoods: data.pausedFoods !== undefined ? normalizePausedFoods(data.pausedFoods) : challenge.pausedFoods,
       startDate,
       endDate,
     },
   });
+}
+
+async function listActivePausedChallenges(profileId, clientDate) {
+  const memberships = await prisma.groupMember.findMany({
+    where: { profileId, isActive: true },
+    select: { groupId: true },
+  });
+  const groupIds = memberships.map((m) => m.groupId);
+  if (groupIds.length === 0) return [];
+
+  const todayDate = dayStart(clientDate || getArgentinaYMD(new Date()));
+  const challenges = await prisma.groupChallenge.findMany({
+    where: {
+      groupId: { in: groupIds },
+      isActive: true,
+      startDate: { lte: todayDate },
+      endDate: { gte: todayDate },
+      pausedFoods: { isEmpty: false },
+    },
+    include: {
+      group: { select: { GroupID: true, name: true } },
+    },
+    orderBy: { startDate: 'desc' },
+  });
+
+  return challenges.map((c) => ({
+    ChallengeID: c.ChallengeID,
+    name: c.name,
+    ruleText: c.ruleText,
+    pausedFoods: c.pausedFoods,
+    groupId: c.groupId,
+    groupName: c.group?.name || 'Your group',
+  }));
 }
 
 async function deleteChallenge(challengeId, profileId) {
@@ -332,7 +387,7 @@ async function respondProposal(proposalId, requesterId, status) {
 
 module.exports = {
   listChallenges, createChallenge, updateChallenge, deleteChallenge, setCompletion,
-  getChallengeProgress, getChallengeRanking,
+  getChallengeProgress, getChallengeRanking, listActivePausedChallenges,
   listMenu, createMenuEntry, updateMenuEntry, deleteMenuEntry,
   listProposals, createProposal, respondProposal,
 };
