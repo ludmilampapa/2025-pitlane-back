@@ -58,6 +58,32 @@ function normalizePausedFoods(input) {
   return cleaned;
 }
 
+const VALID_TARGET_PERCENTAGES = [50, 75, 100];
+
+function normalizeTargetPercentage(input) {
+  if (input === undefined || input === null || input === '') return 100;
+  const parsed = Number(input);
+  if (!Number.isInteger(parsed) || !VALID_TARGET_PERCENTAGES.includes(parsed)) {
+    throw new Error('INVALID_CHALLENGE_TARGET');
+  }
+  return parsed;
+}
+
+function getChallengeLifecycleStatus(challenge, todayYmd) {
+  const startYmd = dayStart(challenge.startDate).toISOString().slice(0, 10);
+  const endYmd = dayStart(challenge.endDate).toISOString().slice(0, 10);
+  if (todayYmd < startYmd) return 'upcoming';
+  if (todayYmd > endYmd) return 'finished';
+  return 'active';
+}
+
+function computeChallengeOutcome(status, percentage, targetPercentage) {
+  if (status === 'upcoming') return 'upcoming';
+  const goalReached = percentage >= targetPercentage;
+  if (status === 'finished') return goalReached ? 'completed' : 'not_completed';
+  return goalReached ? 'goal_reached' : 'in_progress';
+}
+
 async function createChallenge(groupId, profileId, data) {
   await requireAdmin(groupId, profileId);
   if (!data.name?.trim() || !data.ruleText?.trim() || !data.startDate || !data.endDate) {
@@ -67,6 +93,7 @@ async function createChallenge(groupId, profileId, data) {
   const endDate = dayStart(data.endDate);
   if (endDate < startDate) throw new Error('INVALID_CHALLENGE_DATES');
   const pausedFoods = normalizePausedFoods(data.pausedFoods);
+  const targetPercentage = normalizeTargetPercentage(data.targetPercentage);
   return prisma.groupChallenge.create({
     data: {
       groupId: parseInt(groupId),
@@ -74,6 +101,7 @@ async function createChallenge(groupId, profileId, data) {
       description: data.description?.trim() || null,
       ruleText: data.ruleText.trim(),
       pausedFoods,
+      targetPercentage,
       startDate,
       endDate,
       createdById: profileId,
@@ -95,6 +123,7 @@ async function updateChallenge(challengeId, profileId, data) {
       description: data.description?.trim() ?? challenge.description,
       ruleText: data.ruleText?.trim() || challenge.ruleText,
       pausedFoods: data.pausedFoods !== undefined ? normalizePausedFoods(data.pausedFoods) : challenge.pausedFoods,
+      targetPercentage: data.targetPercentage !== undefined ? normalizeTargetPercentage(data.targetPercentage) : challenge.targetPercentage,
       startDate,
       endDate,
     },
@@ -295,7 +324,8 @@ async function getChallengeProgress(challengeId, profileId, clientDate) {
     typeof clientDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(clientDate.trim())
       ? clientDate.trim()
       : getArgentinaYMD(new Date());
-  if (Array.isArray(challenge.pausedFoods) && challenge.pausedFoods.length > 0) {
+  const status = getChallengeLifecycleStatus(challenge, today);
+  if (status === 'active' && Array.isArray(challenge.pausedFoods) && challenge.pausedFoods.length > 0) {
     try {
       await syncChallengeCompletionsForDay(profileId, today);
     } catch (syncError) {
@@ -315,6 +345,10 @@ async function getChallengeProgress(challengeId, profileId, clientDate) {
     cursor = new Date(cursor.getTime() - 86400000);
   }
   const totalDays = daysBetween(challenge.startDate, challenge.endDate);
+  const percentage = totalDays ? Math.min(100, Math.round((completions.length * 100) / totalDays)) : 0;
+  const targetPercentage = challenge.targetPercentage || 100;
+  const goalReached = percentage >= targetPercentage;
+  const outcome = computeChallengeOutcome(status, percentage, targetPercentage);
   return {
     challenge,
     completedDays: completions.length,
@@ -322,7 +356,11 @@ async function getChallengeProgress(challengeId, profileId, clientDate) {
     todayCompleted: completionSet.has(today),
     streak,
     totalDays,
-    percentage: totalDays ? Math.round(completions.length * 100 / totalDays) : 0,
+    percentage,
+    targetPercentage,
+    status,
+    goalReached,
+    outcome,
   };
 }
 
@@ -335,6 +373,8 @@ async function getChallengeRanking(challengeId, requesterId) {
     include: { profile: { select: { id: true, username: true } } },
   });
   const totalDays = daysBetween(challenge.startDate, challenge.endDate);
+  const targetPercentage = challenge.targetPercentage || 100;
+  const status = getChallengeLifecycleStatus(challenge, getArgentinaYMD(new Date()));
   const counts = await prisma.groupChallengeCompletion.groupBy({
     by: ['profileId'],
     where: { challengeId: challenge.ChallengeID, completed: true },
@@ -343,12 +383,18 @@ async function getChallengeRanking(challengeId, requesterId) {
   const countByProfile = new Map(counts.map((row) => [row.profileId, row._count._all]));
   const ranking = members.map((member) => {
     const completedDays = countByProfile.get(member.profileId) || 0;
+    const percentage = totalDays ? Math.min(100, Math.round((completedDays * 100) / totalDays)) : 0;
+    const goalReached = percentage >= targetPercentage;
     return {
       profileId: member.profileId,
       username: member.profile.username,
       completedDays,
       totalDays,
-      percentage: totalDays ? Math.round((completedDays * 100) / totalDays) : 0,
+      percentage,
+      targetPercentage,
+      status,
+      goalReached,
+      outcome: computeChallengeOutcome(status, percentage, targetPercentage),
     };
   });
   ranking.sort((a, b) => b.percentage - a.percentage || b.completedDays - a.completedDays || a.username?.localeCompare(b.username || '') || 0);
@@ -543,6 +589,7 @@ module.exports = {
   listChallenges, createChallenge, updateChallenge, deleteChallenge, setCompletion,
   getChallengeProgress, getChallengeRanking, listActivePausedChallenges,
   syncChallengeCompletionsForDay, consumptionMatchesPausedFoods,
+  normalizeTargetPercentage, getChallengeLifecycleStatus, computeChallengeOutcome,
   listMenu, createMenuEntry, updateMenuEntry, deleteMenuEntry,
   listProposals, createProposal, respondProposal,
 };

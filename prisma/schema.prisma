@@ -421,9 +421,10 @@ model GroupChallenge {
   groupId     Int
   name        String
   description String?
-  ruleText    String
-  pausedFoods String[] @default([])
-  startDate   DateTime
+  ruleText         String
+  pausedFoods      String[] @default([])
+  targetPercentage Int      @default(100)
+  startDate        DateTime
   endDate     DateTime
   isActive    Boolean  @default(true)
   createdById String   @db.Uuid
