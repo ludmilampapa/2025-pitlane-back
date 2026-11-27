@@ -438,4 +438,22 @@ router.get('/:id/primary-badge', authenticateJWT, async (req, res) => {
   }
 });
 
+// DELETE /profile/:id - delete own account profile (protegido, solo el dueño)
+router.delete('/:id', authenticateJWT, async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    if (req.user?.sub !== targetId) {
+      return res.status(403).json({ error: 'You can only delete your own account' });
+    }
+    await prisma.profile.delete({ where: { id: targetId } });
+    res.json({ message: 'Account deleted successfully' });
+  } catch (err) {
+    if (err.code === 'P2025') {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+    console.error('Error deleting profile:', err);
+    res.status(500).json({ error: 'Failed to delete account' });
+  }
+});
+
 module.exports = router;
