@@ -53,7 +53,7 @@ function dispatch(app, { method, url, headers, body }) {
       } catch (e) {
         json = undefined;
       }
-      resolve({ status: res.statusCode, text, body: json, headers: res.getHeaders() });
+      resolve({ status: res.statusCode, statusCode: res.statusCode, text, body: json, headers: res.getHeaders() });
     });
     res.on('error', reject);
 
