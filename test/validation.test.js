@@ -212,4 +212,29 @@ describe('HTTP date & field validation', () => {
       .set('Authorization', userToken());
     expect(badChallenge.status).toBe(400);
   });
+
+  test('challenge targetPercentage normalization and lifecycle outcomes work for 50/75/100', () => {
+    const {
+      normalizeTargetPercentage,
+      getChallengeLifecycleStatus,
+      computeChallengeOutcome,
+    } = jest.requireActual('../controllers/groupChallengesLib');
+
+    expect(normalizeTargetPercentage(undefined)).toBe(100);
+    expect(normalizeTargetPercentage(50)).toBe(50);
+    expect(normalizeTargetPercentage(75)).toBe(75);
+    expect(normalizeTargetPercentage(100)).toBe(100);
+    expect(() => normalizeTargetPercentage(60)).toThrow('INVALID_CHALLENGE_TARGET');
+
+    const ch = { startDate: '2026-11-20', endDate: '2026-11-27' };
+    expect(getChallengeLifecycleStatus(ch, '2026-11-19')).toBe('upcoming');
+    expect(getChallengeLifecycleStatus(ch, '2026-11-25')).toBe('active');
+    expect(getChallengeLifecycleStatus(ch, '2026-11-28')).toBe('finished');
+
+    expect(computeChallengeOutcome('upcoming', 0, 50)).toBe('upcoming');
+    expect(computeChallengeOutcome('active', 40, 50)).toBe('in_progress');
+    expect(computeChallengeOutcome('active', 50, 50)).toBe('goal_reached');
+    expect(computeChallengeOutcome('finished', 75, 75)).toBe('completed');
+    expect(computeChallengeOutcome('finished', 70, 75)).toBe('not_completed');
+  });
 });
