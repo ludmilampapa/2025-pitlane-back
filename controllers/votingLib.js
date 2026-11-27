@@ -709,12 +709,49 @@ async function getVotingSession(votingSessionId) {
 }
 
 /**
- * Get active voting sessions for a group
+ * Get active voting sessions for a group.
+ * Automatically transitions any expired proposal_phase -> voting_phase and
+ * expired voting_phase -> completed so sessions never get stuck.
  */
 async function getGroupActiveVotingSessions(groupId) {
+    const parsedGroupId = parseInt(groupId);
+    const now = new Date();
+
+    const expiredProposals = await prisma.votingSession.findMany({
+        where: {
+            groupId: parsedGroupId,
+            status: 'proposal_phase',
+            proposalEndsAt: { lte: now }
+        },
+        select: { VotingSessionID: true }
+    });
+    for (const s of expiredProposals) {
+        try {
+            await startVotingPhase(s.VotingSessionID);
+        } catch (err) {
+            console.error(`Auto-transition proposal->voting failed for session ${s.VotingSessionID}:`, err);
+        }
+    }
+
+    const expiredVotings = await prisma.votingSession.findMany({
+        where: {
+            groupId: parsedGroupId,
+            status: 'voting_phase',
+            votingEndsAt: { lte: now }
+        },
+        select: { VotingSessionID: true }
+    });
+    for (const s of expiredVotings) {
+        try {
+            await completeVotingSession(s.VotingSessionID);
+        } catch (err) {
+            console.error(`Auto-complete voting failed for session ${s.VotingSessionID}:`, err);
+        }
+    }
+
     const votingSessions = await prisma.votingSession.findMany({
         where: {
-            groupId: parseInt(groupId),
+            groupId: parsedGroupId,
             status: {
                 in: ['proposal_phase', 'voting_phase']
             }
@@ -828,6 +865,65 @@ async function getGroupActiveVotingSessions(groupId) {
     });
 
     return votingSessions;
+}
+
+/**
+ * Force-close (cancel) an active voting session in any phase (proposal_phase or voting_phase).
+ * Allowed for the session initiator, group creator, or group admins.
+ */
+async function forceCloseVotingSession(votingSessionId, requesterId) {
+    const parsedId = parseInt(votingSessionId);
+    const votingSession = await prisma.votingSession.findUnique({
+        where: { VotingSessionID: parsedId },
+        include: {
+            group: {
+                select: {
+                    GroupID: true,
+                    createdBy: true,
+                    members: {
+                        where: { isActive: true },
+                        select: { profileId: true, role: true }
+                    }
+                }
+            }
+        }
+    });
+
+    if (!votingSession) {
+        throw new Error('Voting session not found');
+    }
+
+    if (!['proposal_phase', 'voting_phase'].includes(votingSession.status)) {
+        throw new Error('Voting session is already closed');
+    }
+
+    const isInitiator = votingSession.initiatorId === requesterId;
+    const isOwner = votingSession.group?.createdBy === requesterId;
+    const isAdmin = votingSession.group?.members?.some(
+        (m) => m.profileId === requesterId && m.role === 'admin'
+    );
+
+    if (!isInitiator && !isOwner && !isAdmin) {
+        const err = new Error('Only the session host or group admins can force-close voting');
+        err.statusCode = 403;
+        throw err;
+    }
+
+    const cancelledSession = await prisma.votingSession.update({
+        where: { VotingSessionID: parsedId },
+        data: {
+            status: 'cancelled',
+            completedAt: new Date()
+        }
+    });
+
+    try {
+        await cleanupVotingSession(parsedId);
+    } catch (cleanupErr) {
+        console.error(`Error cleaning up force-closed voting session ${parsedId}:`, cleanupErr);
+    }
+
+    return cancelledSession;
 }
 
 /**
@@ -1285,6 +1381,7 @@ module.exports = {
     castVote,
     undoVote,
     completeVotingSession,
+    forceCloseVotingSession,
     getVotingSession,
     getGroupActiveVotingSessions,
     checkAndTransitionVotingSessions,

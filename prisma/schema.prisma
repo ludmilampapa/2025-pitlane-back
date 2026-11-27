@@ -89,6 +89,7 @@ model Meal {
   MealID            Int               @id @default(autoincrement())
   name              String
   description       String?
+  svgLink           String?
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
   profileId         String            @db.Uuid
