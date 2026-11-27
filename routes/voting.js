@@ -41,7 +41,7 @@ router.get('/groups/:groupId/active', async (req, res) => {
  */
 router.post('/sessions/start', async (req, res) => {
     try {
-        const { initiatorId, groupId, title, description } = req.body;
+        const { initiatorId, groupId, title, description, totalDurationMinutes } = req.body;
 
         if (!initiatorId || !groupId) {
             return res.status(400).json({ 
@@ -49,7 +49,7 @@ router.post('/sessions/start', async (req, res) => {
             });
         }
 
-        const session = await startVotingSession(initiatorId, groupId, title, description);
+        const session = await startVotingSession(initiatorId, groupId, title, description, totalDurationMinutes);
         res.status(201).json(session);
     } catch (error) {
         console.error('Error starting voting session:', error);

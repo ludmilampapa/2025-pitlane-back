@@ -7,7 +7,7 @@ const { formatArgentinaDate } = require('../lib/timezone');
 /**
  * Start a new voting session for a group
  */
-async function startVotingSession(initiatorId, groupId, title = null, description = null) {
+async function startVotingSession(initiatorId, groupId, title = null, description = null, totalDurationMinutes = 15) {
     // Verify the initiator is a member of the group
     const membership = await prisma.groupMember.findFirst({
         where: {
@@ -35,8 +35,15 @@ async function startVotingSession(initiatorId, groupId, title = null, descriptio
         throw new Error('There is already an active voting session for this group');
     }
 
-    // Create the voting session with proposal phase ending in 5 minutes
-    const proposalEndsAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes from now
+    // Compute total game duration (2..60 min, default 15 min) and split into Round 1 (35%) + Round 2 (65%)
+    const parsedTotal = Number(totalDurationMinutes);
+    const totalMinutes = Number.isFinite(parsedTotal)
+        ? Math.min(60, Math.max(2, Math.round(parsedTotal)))
+        : 15;
+    const proposalMinutes = Math.max(1, Math.round(totalMinutes * 0.35));
+    const nowMs = Date.now();
+    const proposalEndsAt = new Date(nowMs + proposalMinutes * 60 * 1000);
+    const votingEndsAt = new Date(nowMs + totalMinutes * 60 * 1000);
 
     const votingSession = await prisma.votingSession.create({
         data: {
@@ -45,6 +52,7 @@ async function startVotingSession(initiatorId, groupId, title = null, descriptio
             title: title || `Meal Vote - ${formatArgentinaDate(new Date())}`,
             description,
             proposalEndsAt,
+            votingEndsAt,
             status: 'proposal_phase'
         }
     });
@@ -280,8 +288,12 @@ async function startVotingPhase(votingSessionId) {
         await seedRandomProposalsIfEmpty(votingSession, 5);
     }
 
-    // Set voting to end in 10 minutes (adjustable)
-    const votingEndsAt = new Date(Date.now() + 10 * 60 * 1000);
+    // Preserve the total game deadline if already scheduled and still in the future; otherwise default to 10 min
+    const existingEndMs = votingSession.votingEndsAt ? new Date(votingSession.votingEndsAt).getTime() : 0;
+    const votingEndsAt =
+        existingEndMs > Date.now() + 30 * 1000
+            ? new Date(existingEndMs)
+            : new Date(Date.now() + 10 * 60 * 1000);
 
     await prisma.votingSession.update({
         where: { VotingSessionID: parseInt(votingSessionId) },
@@ -484,14 +496,17 @@ async function completeVotingSession(votingSessionId) {
         throw new Error('Voting session is not in voting phase');
     }
 
-    // Find the proposal with the most votes
-    const winnerProposal = votingSession.proposals.reduce((prev, current) => {
-        return (current.voteCount > prev.voteCount) ? current : prev;
-    }, votingSession.proposals[0]);
-
-    if (!winnerProposal) {
+    if (!votingSession.proposals || votingSession.proposals.length === 0) {
         throw new Error('No proposals found to determine winner');
     }
+
+    // Find the maximum vote count; on a tie, randomly draw among tied top proposals
+    const maxVotes = Math.max(...votingSession.proposals.map((p) => p.voteCount || 0));
+    const tiedTopProposals = votingSession.proposals.filter((p) => (p.voteCount || 0) === maxVotes);
+    const tieBreakerUsed = tiedTopProposals.length > 1;
+    const winnerProposal =
+        tiedTopProposals[Math.floor(Math.random() * tiedTopProposals.length)] ||
+        votingSession.proposals[0];
 
     // Calculate total votes
     const totalVotes = await prisma.vote.count({
@@ -572,7 +587,9 @@ async function completeVotingSession(votingSessionId) {
     return {
         session: completedSession,
         winnerProposal,
-        totalVotes
+        totalVotes,
+        tieBreakerUsed,
+        tiedCount: tiedTopProposals.length
     };
 }
 
