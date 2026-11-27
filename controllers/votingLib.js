@@ -461,7 +461,7 @@ async function undoVote(votingSessionId, mealProposalId, voterId) {
 /**
  * Complete voting session and determine winner
  */
-async function completeVotingSession(votingSessionId) {
+async function completeVotingSession(votingSessionId, forcedWinnerProposalId = null) {
     const votingSession = await prisma.votingSession.findUnique({
         where: { VotingSessionID: parseInt(votingSessionId) },
         include: {
@@ -500,11 +500,18 @@ async function completeVotingSession(votingSessionId) {
         throw new Error('No proposals found to determine winner');
     }
 
-    // Find the maximum vote count; on a tie, randomly draw among tied top proposals
+    // If a forced winner (e.g. from Meal Roulette) is provided, crown that proposal directly
+    const parsedForcedId = forcedWinnerProposalId ? parseInt(forcedWinnerProposalId) : null;
+    const forcedProposal = parsedForcedId
+        ? votingSession.proposals.find((p) => p.MealProposalID === parsedForcedId)
+        : null;
+
+    // Otherwise find the maximum vote count; on a tie, randomly draw among tied top proposals
     const maxVotes = Math.max(...votingSession.proposals.map((p) => p.voteCount || 0));
     const tiedTopProposals = votingSession.proposals.filter((p) => (p.voteCount || 0) === maxVotes);
-    const tieBreakerUsed = tiedTopProposals.length > 1;
+    const tieBreakerUsed = !forcedProposal && tiedTopProposals.length > 1;
     const winnerProposal =
+        forcedProposal ||
         tiedTopProposals[Math.floor(Math.random() * tiedTopProposals.length)] ||
         votingSession.proposals[0];
 
