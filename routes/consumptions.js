@@ -226,6 +226,16 @@ router.put('/:id', async (req, res) => {
                 error: 'Profile ID is required' 
             });
         }
+
+        if (consumedAt !== undefined) {
+            const parsedDate = new Date(consumedAt);
+            if (Number.isNaN(parsedDate.getTime())) {
+                return res.status(400).json({ error: 'Invalid consumedAt date' });
+            }
+            if (parsedDate.getTime() > Date.now() + 60_000) {
+                return res.status(400).json({ error: 'Cannot set consumption date in the future' });
+            }
+        }
         
         const consumptionData = { name, description, meals, consumedAt };
         const updatedConsumption = await consumptionsLib.updateConsumption(
