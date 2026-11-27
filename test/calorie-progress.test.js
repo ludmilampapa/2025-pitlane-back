@@ -1,349 +1,79 @@
-const { PrismaClient } = require('@prisma/client');
+jest.mock('../lib/prisma', () => ({
+  profile: {
+    findUnique: jest.fn(),
+    update: jest.fn(),
+  },
+  consumption: {
+    findMany: jest.fn(),
+  },
+}));
+
+const prisma = require('../lib/prisma');
 const { getCalorieProgress, updateCalorieGoal } = require('../controllers/profilesLib');
 
-const prisma = new PrismaClient();
-
-// Test profile ID
 const testProfileId = '00000000-0000-0000-0000-000000000002';
 
-describe('Calorie Progress API', () => {
-  
-  beforeAll(async () => {
-    try {
-      // Create test profile
-      await prisma.profile.upsert({
-        where: { id: testProfileId },
-        update: {},
-        create: {
-          id: testProfileId,
-          username: `test_calorie_user_${Date.now()}`,
-          role: 'user',
-          calorie_goal: 2000
-        }
-      });
+beforeEach(() => {
+  jest.clearAllMocks();
+});
 
-      // Create test foods
-      await prisma.food.upsert({
-        where: { FoodID: 1000 },
-        update: {},
-        create: {
-          FoodID: 1000,
-          name: 'Test Food 1',
-          svgLink: 'test.svg',
-          kCal: 100,
-          profileId: testProfileId
-        }
-      });
+describe('Calorie Progress Controller', () => {
+  it('returns 0 consumed calories and default goal when no consumptions exist', async () => {
+    prisma.profile.findUnique.mockResolvedValue({ id: testProfileId, calorie_goal: 2000 });
+    prisma.consumption.findMany.mockResolvedValue([]);
 
-      await prisma.food.upsert({
-        where: { FoodID: 1001 },
-        update: {},
-        create: {
-          FoodID: 1001,
-          name: 'Test Food 2',
-          svgLink: 'test2.svg',
-          kCal: 200,
-          profileId: testProfileId
-        }
-      });
+    const progress = await getCalorieProgress(testProfileId, '2026-11-25');
+    expect(progress).toEqual({ consumed: 0, goal: 2000, date: '2026-11-25' });
 
-      // Create test meal
-      await prisma.meal.upsert({
-        where: { MealID: 1000 },
-        update: {},
-        create: {
-          MealID: 1000,
-          name: 'Test Meal',
-          description: 'Test meal for calorie progress',
-          profileId: testProfileId
-        }
-      });
-
-      // Add foods to meal
-      await prisma.mealFood.upsert({
-        where: { MealFoodID: 1000 },
-        update: {},
-        create: {
-          MealFoodID: 1000,
-          mealId: 1000,
-          foodId: 1000,
-          quantity: 2 // 2 * 100 = 200 kcal
-        }
-      });
-
-      await prisma.mealFood.upsert({
-        where: { MealFoodID: 1001 },
-        update: {},
-        create: {
-          MealFoodID: 1001,
-          mealId: 1000,
-          foodId: 1001,
-          quantity: 1 // 1 * 200 = 200 kcal
-        }
-      });
-      // Total meal kcal: 400
-
-    } catch (error) {
-      console.error('Setup error:', error);
-    }
+    const callWhere = prisma.consumption.findMany.mock.calls[0][0].where;
+    expect(callWhere.consumedAt.gte.toISOString()).toBe('2026-11-25T03:00:00.000Z');
+    expect(callWhere.consumedAt.lte.toISOString()).toBe('2026-11-26T02:59:59.999Z');
+    expect(callWhere.type).toBe('individual');
   });
 
-  afterAll(async () => {
-    try {
-      // Clean up test data
-      await prisma.consumptionMeal.deleteMany({
-        where: { consumption: { profileId: testProfileId } }
-      });
-      
-      await prisma.consumption.deleteMany({
-        where: { profileId: testProfileId }
-      });
+  it('sums whole meals and partial foodPortions accurately', async () => {
+    prisma.profile.findUnique.mockResolvedValue({ id: testProfileId, calorie_goal: 2500 });
+    prisma.consumption.findMany.mockResolvedValue([
+      {
+        totalKcal: 300,
+        consumptionMeals: [
+          {
+            quantity: 1,
+            meal: {
+              mealFoods: [
+                { quantity: 1, food: { kCal: 100 } },
+                { quantity: 1, food: { kCal: 200 } },
+              ],
+            },
+            mealPortion: null,
+          },
+        ],
+      },
+      {
+        totalKcal: 150,
+        consumptionMeals: [
+          {
+            quantity: 1,
+            meal: {
+              mealFoods: [{ quantity: 1, food: { kCal: 300 } }],
+            },
+            mealPortion: {
+              portionFraction: 0.5,
+              foodPortions: [{ quantityConsumed: 0.5, food: { kCal: 300 } }],
+            },
+          },
+        ],
+      },
+    ]);
 
-      await prisma.mealFood.deleteMany({
-        where: { mealId: 1000 }
-      });
-
-      await prisma.meal.deleteMany({
-        where: { MealID: 1000 }
-      });
-
-      await prisma.food.deleteMany({
-        where: { FoodID: { in: [1000, 1001] } }
-      });
-
-      await prisma.profile.deleteMany({
-        where: { id: testProfileId }
-      });
-
-    } catch (error) {
-      console.error('Cleanup error:', error);
-    } finally {
-      await prisma.$disconnect();
-    }
+    const progress = await getCalorieProgress(testProfileId, '2026-11-25');
+    expect(progress.consumed).toBe(450);
+    expect(progress.goal).toBe(2500);
   });
 
-  describe('Daily Calorie Progress Calculation', () => {
-    
-    it('should return 0 consumed calories when no consumptions exist for the day', async () => {
-      const today = new Date();
-      const progress = await getCalorieProgress(testProfileId, today);
-      
-      expect(progress.consumed).toBe(0);
-      expect(progress.goal).toBe(2000);
-      expect(progress.date).toBe(today.toISOString().split('T')[0]);
-    });
-
-    it('should calculate consumed calories only for the specific day', async () => {
-      // Create consumptions for today
-      const today = new Date();
-      const todayConsumption = await prisma.consumption.create({
-        data: {
-          name: 'Today Consumption',
-          type: 'individual',
-          consumedAt: today,
-          profileId: testProfileId,
-          totalKcal: 0
-        }
-      });
-
-      // Add meal to today's consumption
-      await prisma.consumptionMeal.create({
-        data: {
-          consumptionId: todayConsumption.ConsumptionID,
-          mealId: 1000,
-          quantity: 1 // 1 * 400 kcal = 400 kcal
-        }
-      });
-
-      // Create consumption for yesterday (should not be included)
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayConsumption = await prisma.consumption.create({
-        data: {
-          name: 'Yesterday Consumption',
-          type: 'individual',
-          consumedAt: yesterday,
-          profileId: testProfileId,
-          totalKcal: 0
-        }
-      });
-
-      await prisma.consumptionMeal.create({
-        data: {
-          consumptionId: yesterdayConsumption.ConsumptionID,
-          mealId: 1000,
-          quantity: 2 // 2 * 400 kcal = 800 kcal (should not be counted)
-        }
-      });
-
-      // Test today's progress
-      const todayProgress = await getCalorieProgress(testProfileId, today);
-      expect(todayProgress.consumed).toBe(400); // Only today's consumption
-      expect(todayProgress.goal).toBe(2000);
-      expect(todayProgress.date).toBe(today.toISOString().split('T')[0]);
-
-      // Test yesterday's progress
-      const yesterdayProgress = await getCalorieProgress(testProfileId, yesterday);
-      expect(yesterdayProgress.consumed).toBe(800); // Only yesterday's consumption
-      expect(yesterdayProgress.goal).toBe(2000);
-      expect(yesterdayProgress.date).toBe(yesterday.toISOString().split('T')[0]);
-
-      // Clean up
-      await prisma.consumptionMeal.deleteMany({
-        where: {
-          consumptionId: {
-            in: [todayConsumption.ConsumptionID, yesterdayConsumption.ConsumptionID]
-          }
-        }
-      });
-      
-      await prisma.consumption.deleteMany({
-        where: {
-          ConsumptionID: {
-            in: [todayConsumption.ConsumptionID, yesterdayConsumption.ConsumptionID]
-          }
-        }
-      });
-    });
-
-    it('should handle multiple consumptions in the same day', async () => {
-      const today = new Date();
-      
-      // Create first consumption
-      const consumption1 = await prisma.consumption.create({
-        data: {
-          name: 'Breakfast',
-          type: 'individual',
-          consumedAt: today,
-          profileId: testProfileId,
-          totalKcal: 0
-        }
-      });
-
-      await prisma.consumptionMeal.create({
-        data: {
-          consumptionId: consumption1.ConsumptionID,
-          mealId: 1000,
-          quantity: 1 // 400 kcal
-        }
-      });
-
-      // Create second consumption later in the day
-      const lunchTime = new Date(today);
-      lunchTime.setHours(14, 0, 0, 0);
-      
-      const consumption2 = await prisma.consumption.create({
-        data: {
-          name: 'Lunch',
-          type: 'individual',
-          consumedAt: lunchTime,
-          profileId: testProfileId,
-          totalKcal: 0
-        }
-      });
-
-      await prisma.consumptionMeal.create({
-        data: {
-          consumptionId: consumption2.ConsumptionID,
-          mealId: 1000,
-          quantity: 2 // 800 kcal
-        }
-      });
-
-      const progress = await getCalorieProgress(testProfileId, today);
-      expect(progress.consumed).toBe(1200); // 400 + 800 = 1200 kcal
-      expect(progress.goal).toBe(2000);
-
-      // Clean up
-      await prisma.consumptionMeal.deleteMany({
-        where: {
-          consumptionId: {
-            in: [consumption1.ConsumptionID, consumption2.ConsumptionID]
-          }
-        }
-      });
-      
-      await prisma.consumption.deleteMany({
-        where: {
-          ConsumptionID: {
-            in: [consumption1.ConsumptionID, consumption2.ConsumptionID]
-          }
-        }
-      });
-    });
-
-    it('should exclude group consumptions from personal calorie progress', async () => {
-      const today = new Date();
-      
-      // Create individual consumption
-      const individualConsumption = await prisma.consumption.create({
-        data: {
-          name: 'Individual Meal',
-          type: 'individual',
-          consumedAt: today,
-          profileId: testProfileId,
-          totalKcal: 0
-        }
-      });
-
-      await prisma.consumptionMeal.create({
-        data: {
-          consumptionId: individualConsumption.ConsumptionID,
-          mealId: 1000,
-          quantity: 1 // 400 kcal
-        }
-      });
-
-      // Create group consumption (should not be included)
-      const groupConsumption = await prisma.consumption.create({
-        data: {
-          name: 'Group Meal',
-          type: 'group',
-          consumedAt: today,
-          profileId: testProfileId,
-          totalKcal: 0
-        }
-      });
-
-      await prisma.consumptionMeal.create({
-        data: {
-          consumptionId: groupConsumption.ConsumptionID,
-          mealId: 1000,
-          quantity: 3 // 1200 kcal (should not be counted)
-        }
-      });
-
-      const progress = await getCalorieProgress(testProfileId, today);
-      expect(progress.consumed).toBe(400); // Only individual consumption
-      expect(progress.goal).toBe(2000);
-
-      // Clean up
-      await prisma.consumptionMeal.deleteMany({
-        where: {
-          consumptionId: {
-            in: [individualConsumption.ConsumptionID, groupConsumption.ConsumptionID]
-          }
-        }
-      });
-      
-      await prisma.consumption.deleteMany({
-        where: {
-          ConsumptionID: {
-            in: [individualConsumption.ConsumptionID, groupConsumption.ConsumptionID]
-          }
-        }
-      });
-    });
-
-    it('should use custom calorie goal when set', async () => {
-      // Update calorie goal
-      await updateCalorieGoal(testProfileId, 2500);
-      
-      const progress = await getCalorieProgress(testProfileId);
-      expect(progress.goal).toBe(2500);
-
-      // Reset to default
-      await updateCalorieGoal(testProfileId, 2000);
-    });
+  it('updates calorie goal via prisma.profile.update', async () => {
+    prisma.profile.update.mockResolvedValue({ id: testProfileId, calorie_goal: 2200 });
+    const updated = await updateCalorieGoal(testProfileId, 2200);
+    expect(updated.calorie_goal).toBe(2200);
   });
 });

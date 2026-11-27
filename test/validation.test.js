@@ -200,4 +200,16 @@ describe('HTTP date & field validation', () => {
     };
     expect(consumptionMatchesPausedFoods(consumedSoda, ['Soda'])).toBe(true);
   });
+
+  test('challenge and menu routes reject non-integer IDs with 400', async () => {
+    const badGroup = await request(app)
+      .get('/groups/1abc/challenges')
+      .set('Authorization', userToken());
+    expect(badGroup.status).toBe(400);
+
+    const badChallenge = await request(app)
+      .delete('/challenges/notanid')
+      .set('Authorization', userToken());
+    expect(badChallenge.status).toBe(400);
+  });
 });
