@@ -86,7 +86,7 @@ function computeChallengeOutcome(status, percentage, targetPercentage) {
 
 async function createChallenge(groupId, profileId, data) {
   await requireAdmin(groupId, profileId);
-  if (!data.name?.trim() || !data.ruleText?.trim() || !data.startDate || !data.endDate) {
+  if (!data.name?.trim() || !data.startDate || !data.endDate) {
     throw new Error('INVALID_CHALLENGE_DATA');
   }
   const startDate = dayStart(data.startDate);
@@ -94,12 +94,17 @@ async function createChallenge(groupId, profileId, data) {
   if (endDate < startDate) throw new Error('INVALID_CHALLENGE_DATES');
   const pausedFoods = normalizePausedFoods(data.pausedFoods);
   const targetPercentage = normalizeTargetPercentage(data.targetPercentage);
+  const resolvedRuleText =
+    data.ruleText?.trim() ||
+    (pausedFoods.length > 0
+      ? `Take a break from: ${pausedFoods.join(', ')}`
+      : data.description?.trim() || data.name.trim());
   return prisma.groupChallenge.create({
     data: {
       groupId: parseInt(groupId),
       name: data.name.trim(),
       description: data.description?.trim() || null,
-      ruleText: data.ruleText.trim(),
+      ruleText: resolvedRuleText,
       pausedFoods,
       targetPercentage,
       startDate,
@@ -116,13 +121,21 @@ async function updateChallenge(challengeId, profileId, data) {
   const startDate = data.startDate ? dayStart(data.startDate) : challenge.startDate;
   const endDate = data.endDate ? dayStart(data.endDate) : challenge.endDate;
   if (endDate < startDate) throw new Error('INVALID_CHALLENGE_DATES');
+  const nextPausedFoods = data.pausedFoods !== undefined ? normalizePausedFoods(data.pausedFoods) : challenge.pausedFoods;
+  const nextName = data.name?.trim() || challenge.name;
+  const nextDescription = data.description !== undefined ? (data.description?.trim() || null) : challenge.description;
+  const nextRuleText =
+    data.ruleText?.trim() ||
+    (nextPausedFoods.length > 0
+      ? `Take a break from: ${nextPausedFoods.join(', ')}`
+      : nextDescription || nextName);
   return prisma.groupChallenge.update({
     where: { ChallengeID: parseInt(challengeId) },
     data: {
-      name: data.name?.trim() || challenge.name,
-      description: data.description?.trim() ?? challenge.description,
-      ruleText: data.ruleText?.trim() || challenge.ruleText,
-      pausedFoods: data.pausedFoods !== undefined ? normalizePausedFoods(data.pausedFoods) : challenge.pausedFoods,
+      name: nextName,
+      description: nextDescription,
+      ruleText: nextRuleText,
+      pausedFoods: nextPausedFoods,
       targetPercentage: data.targetPercentage !== undefined ? normalizeTargetPercentage(data.targetPercentage) : challenge.targetPercentage,
       startDate,
       endDate,

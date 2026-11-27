@@ -7,6 +7,7 @@ const {
     castVote,
     undoVote,
     completeVotingSession,
+    forceCloseVotingSession,
     getVotingSession,
     getGroupActiveVotingSessions,
     checkAndTransitionVotingSessions,
@@ -163,6 +164,25 @@ router.post('/sessions/:sessionId/complete', async (req, res) => {
     } catch (error) {
         console.error('Error completing voting session:', error);
         res.status(400).json({ error: error.message });
+    }
+});
+
+/**
+ * POST /voting/sessions/:sessionId/force-close
+ * Force-close (cancel) an active voting session in any phase
+ */
+router.post('/sessions/:sessionId/force-close', async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const requesterId = req.user?.sub || req.body?.userId;
+        if (!requesterId) {
+            return res.status(401).json({ error: 'Authentication required' });
+        }
+        const session = await forceCloseVotingSession(sessionId, requesterId);
+        res.json(session);
+    } catch (error) {
+        console.error('Error force-closing voting session:', error);
+        res.status(error.statusCode || 400).json({ error: error.message });
     }
 });
 
