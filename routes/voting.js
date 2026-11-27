@@ -159,7 +159,8 @@ router.post('/sessions/:sessionId/vote', async (req, res) => {
 router.post('/sessions/:sessionId/complete', async (req, res) => {
     try {
         const { sessionId } = req.params;
-        const result = await completeVotingSession(sessionId);
+        const { winnerProposalId } = req.body || {};
+        const result = await completeVotingSession(sessionId, winnerProposalId);
         res.json(result);
     } catch (error) {
         console.error('Error completing voting session:', error);
