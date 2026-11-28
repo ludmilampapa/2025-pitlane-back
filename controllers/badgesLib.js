@@ -184,9 +184,19 @@ class BadgesLibrary {
           break;
 
         case 'voting_won':
-          const votingWinnerBadge = await prisma.badge.findFirst({
+          let votingWinnerBadge = await prisma.badge.findFirst({
             where: { badgeType: 'voting_winner', isActive: true }
           });
+          if (!votingWinnerBadge) {
+            votingWinnerBadge = await prisma.badge.create({
+              data: {
+                name: 'Vote Winner',
+                description: 'Won a group meal voting session',
+                badgeType: 'voting_winner',
+                isActive: true
+              }
+            });
+          }
           if (votingWinnerBadge) {
             const result = await this.awardBadge(profileId, votingWinnerBadge.BadgeID);
             results.push(result);
