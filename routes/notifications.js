@@ -22,6 +22,7 @@ router.get('/', async (req, res) => {
     });
     const groupIds = memberships.map((m) => m.groupId);
     const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
     const [activeVotes, pendingMenuProposals, pendingInvitations] = await Promise.all([
       groupIds.length > 0
@@ -29,6 +30,7 @@ router.get('/', async (req, res) => {
             where: {
               groupId: { in: groupIds },
               status: { in: ['proposal_phase', 'voting_phase'] },
+              createdAt: { gte: oneHourAgo },
             },
             include: {
               group: { select: { GroupID: true, name: true } },
@@ -43,6 +45,7 @@ router.get('/', async (req, res) => {
         ? prisma.menuProposal.findMany({
             where: {
               status: 'pending',
+              createdAt: { gte: oneHourAgo },
               menuEntry: {
                 groupId: { in: groupIds },
                 isActive: true,
@@ -70,6 +73,7 @@ router.get('/', async (req, res) => {
         where: {
           invitedUserId: userId,
           status: 'pending',
+          createdAt: { gte: oneHourAgo },
         },
         include: {
           group: { select: { GroupID: true, name: true } },
@@ -83,10 +87,9 @@ router.get('/', async (req, res) => {
     const notifications = [];
 
     for (const session of activeVotes) {
-      // Skip sessions whose timer clearly expired a long time ago (over 2 hours past end)
       const endRef =
         session.status === 'proposal_phase' ? session.proposalEndsAt : session.votingEndsAt;
-      if (endRef && now.getTime() - new Date(endRef).getTime() > 2 * 60 * 60 * 1000) {
+      if (endRef && now.getTime() > new Date(endRef).getTime()) {
         continue;
       }
 
