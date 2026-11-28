@@ -561,14 +561,16 @@ async function completeVotingSession(votingSessionId, forcedWinnerProposalId = n
         }
     });
 
-    // Award badge to winner meal creator
+    // Award badge to the user who proposed the winning meal (fallback to meal creator)
+    const winnerUserId = winnerProposal?.proposedById || completedSession.winnerMeal?.profile?.id || null;
+    let winnerBadges = [];
     try {
-        if (completedSession.winnerMeal && completedSession.winnerMeal.profile) {
-            const winnerId = completedSession.winnerMeal.profile.id;
-            const badgeResult = await BadgesLibrary.checkAndAwardBadges(winnerId, 'voting_won');
+        if (winnerUserId) {
+            const badgeResult = await BadgesLibrary.checkAndAwardBadges(winnerUserId, 'voting_won');
             if (badgeResult.success && badgeResult.newlyEarnedBadges.length > 0) {
-                console.log(`User ${winnerId} earned ${badgeResult.newlyEarnedBadges.length} new badge(s) for winning a vote!`);
-                completedSession.winnerBadges = badgeResult.newlyEarnedBadges;
+                console.log(`User ${winnerUserId} earned ${badgeResult.newlyEarnedBadges.length} new badge(s) for winning a vote!`);
+                winnerBadges = badgeResult.newlyEarnedBadges;
+                completedSession.winnerBadges = winnerBadges;
             }
         }
     } catch (badgeError) {
@@ -597,6 +599,8 @@ async function completeVotingSession(votingSessionId, forcedWinnerProposalId = n
     return {
         session: completedSession,
         winnerProposal,
+        winnerUserId,
+        winnerBadges,
         totalVotes,
         tieBreakerUsed,
         tiedCount: tiedTopProposals.length
