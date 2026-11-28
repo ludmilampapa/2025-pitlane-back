@@ -26,6 +26,30 @@ const {
 const prisma = require('../lib/prisma');
 const { validateBody, str, int, oneOf, intArray, array } = require('../middleware/validate');
 
+/** Reject dangerous URI schemes (javascript:, vbscript:, data:text/html) in URL fields. */
+function rejectUnsafeUrl(field) {
+  return (req, res, next) => {
+    const val = req.body && req.body[field];
+    if (val === undefined || val === null || val === '') return next();
+    if (typeof val !== 'string') {
+      return res.status(400).json({ error: `${field} must be a string` });
+    }
+    const trimmed = val.trim();
+    const isSafe =
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('/') ||
+      trimmed.startsWith('data:image/svg+xml') ||
+      trimmed.startsWith('data:image/png') ||
+      trimmed.startsWith('data:image/jpeg') ||
+      trimmed.startsWith('data:image/webp');
+    if (!isSafe) {
+      return res.status(400).json({ error: `${field} contains an unsupported or unsafe URL scheme` });
+    }
+    return next();
+  };
+}
+
 // ---------------------------------------------------------------- groups
 const groups = express.Router();
 const groupBody = validateBody({
@@ -104,14 +128,14 @@ consumptions.get('/:id', async (req, res, next) => {
   return res.status(403).json({ error: 'Forbidden' });
 });
 consumptions.post('/individual', bindBody('profileId'), validateBody({ name: str({ min: 1, max: 120, required: true }), description: str({ max: 500 }), meals: array({ min: 1, max: 50, required: true }) }));
-consumptions.post('/group', bindBody('profileId'), validateBody({ name: str({ min: 1, max: 120, required: true }), description: str({ max: 500 }), meals: array({ min: 1, max: 50, required: true }) }));
-consumptions.put('/:id', requireIntParam('id'), bindBody('profileId'));
+consumptions.post('/group', bindBody('profileId'), requireGroupMember('groupId', { source: 'body' }), validateBody({ name: str({ min: 1, max: 120, required: true }), description: str({ max: 500 }), meals: array({ min: 1, max: 50, required: true }) }));
+consumptions.put('/:id', requireIntParam('id'), bindBody('profileId'), validateBody({ name: str({ min: 1, max: 120 }), description: str({ max: 500 }) }));
 consumptions.delete('/:id', requireIntParam('id'), bindBody('profileId'));
 
 // ---------------------------------------------------------------- voting
 const voting = express.Router();
 voting.get('/groups/:groupId/active', requireGroupMember('groupId'));
-voting.post('/sessions/start', bindBody('initiatorId'), requireGroupMember('groupId', { source: 'body' }), validateBody({ title: str({ max: 120 }), description: str({ max: 500 }) }));
+voting.post('/sessions/start', bindBody('initiatorId'), requireGroupMember('groupId', { source: 'body' }), validateBody({ title: str({ max: 120 }), description: str({ max: 500 }), totalDurationMinutes: int({ min: 2, max: 60 }) }));
 // Every other /sessions/:sessionId/* route requires membership in the session's group.
 voting.use('/sessions/:sessionId', requireSessionMember('sessionId'));
 voting.post('/sessions/:sessionId/propose', bindBody('proposedById'));
@@ -120,6 +144,8 @@ voting.delete('/sessions/:sessionId/proposals/:proposalId/vote', bindBody('voter
 voting.post('/sessions/:sessionId/confirm-ready', bindBody('userId'));
 voting.post('/sessions/:sessionId/confirm-votes', bindBody('userId'));
 voting.post('/sessions/:sessionId/create-consumption', bindBody('profileId'));
+voting.post('/sessions/:sessionId/force-close', bindBody('userId'));
+voting.post('/sessions/:sessionId/complete', validateBody({ winnerProposalId: int({ min: 1 }) }));
 
 // ---------------------------------------------------------------- voting history
 const votingHistory = express.Router();
@@ -148,8 +174,8 @@ meals.delete('/:id', requireResourceOwner('meal'));
 // ---------------------------------------------------------------- foods
 const foods = express.Router();
 foods.get('/recommended/:profileId', requireSelfParam('profileId'));
-foods.post('/', bindBody('profileId'), validateBody({ name: str({ min: 1, max: 100, required: true }), svgLink: str({ max: 500 }) }));
-foods.put('/:id', requireResourceOwner('food'), validateBody({ name: str({ min: 1, max: 100 }), svgLink: str({ max: 500 }) }));
+foods.post('/', bindBody('profileId'), validateBody({ name: str({ min: 1, max: 100, required: true }), svgLink: str({ max: 500 }) }), rejectUnsafeUrl('svgLink'));
+foods.put('/:id', requireResourceOwner('food'), validateBody({ name: str({ min: 1, max: 100 }), svgLink: str({ max: 500 }) }), rejectUnsafeUrl('svgLink'));
 foods.delete('/:id', requireResourceOwner('food'));
 
 // ---------------------------------------------------------------- badges
@@ -181,7 +207,7 @@ profile.post('/:id/dietary-restrictions', requireSelfParam('id'), restrictionsRu
 profile.delete('/:id/dietary-restrictions', requireSelfParam('id'), restrictionsRule);
 profile.put('/:id/dietary-restrictions', requireSelfParam('id'), restrictionsRule);
 profile.put('/:id/preferences-and-restrictions', requireSelfParam('id'), validateBody({ preferences: intArray(), dietaryRestrictions: intArray() }));
-profile.delete('/:id', requireSelfParam('id'));
+profile.delete('/:id', requireSelfParam('id', { allowAdmin: false }));
 profile.put('/:id/calorie-goal', requireSelfParam('id'), validateBody({ calorieGoal: int({ min: 800, max: 5000, required: true }) }));
 profile.get('/:id/calorie-progress', requireSelfParam('id'));
 profile.put('/:id/primary-badge', requireSelfParam('id'));

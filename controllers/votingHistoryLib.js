@@ -46,7 +46,16 @@ async function getGroupVotingHistory(groupId, limit = 10, offset = 0) {
           }
         }
       },
-      proposals: true,
+      proposals: {
+        include: {
+          proposedBy: {
+            select: {
+              id: true,
+              username: true
+            }
+          }
+        }
+      },
       _count: {
         select: {
           participants: true
@@ -61,19 +70,27 @@ async function getGroupVotingHistory(groupId, limit = 10, offset = 0) {
   });
 
   // Format the response
-  const formattedSessions = sessions.map(session => ({
-    sessionId: session.VotingSessionID,
-    createdAt: session.createdAt,
-    completedAt: session.completedAt,
-    status: session.status,
-    winnerMeal: {
-      mealId: session.winnerMeal?.MealID,
-      name: session.winnerMeal?.name,
-      voteCount: session.proposals?.find(p => p.mealId === session.winnerMealId)?.voteCount || 0
-    },
-    totalVotes: session.proposals?.reduce((sum, p) => sum + (p.voteCount || 0), 0) || 0,
-    participantCount: session._count.participants
-  }));
+  const formattedSessions = sessions.map(session => {
+    const winningProposal = session.proposals?.find(p => p.mealId === session.winnerMealId);
+    return {
+      sessionId: session.VotingSessionID,
+      createdAt: session.createdAt,
+      completedAt: session.completedAt,
+      status: session.status,
+      winnerMeal: {
+        mealId: session.winnerMeal?.MealID,
+        name: session.winnerMeal?.name,
+        voteCount: winningProposal?.voteCount || 0,
+        proposedById: winningProposal?.proposedById || winningProposal?.proposedBy?.id || null,
+        proposedByUsername: winningProposal?.proposedBy?.username || null
+      },
+      totalVotes: session.proposals?.reduce((sum, p) => sum + (p.voteCount || 0), 0) || 0,
+      participantCount: session._count.participants,
+      participantIds: session.participants?.map(p => p.userId) || [],
+      initiatorId: session.initiator?.id || null,
+      initiatorUsername: session.initiator?.username || null
+    };
+  });
 
   return {
     sessions: formattedSessions,

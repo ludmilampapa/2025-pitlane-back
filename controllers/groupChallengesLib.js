@@ -1,5 +1,31 @@
 const prisma = require('../lib/prisma');
 const { argentinaDateToUtcMidnight, getArgentinaDayBounds, getArgentinaYMD } = require('../lib/timezone');
+const BadgesLibrary = require('./badgesLib');
+
+async function awardChallengeCompletedBadge(profileId) {
+  try {
+    if (!prisma.badge?.findFirst) return;
+    let badge = await prisma.badge.findFirst({
+      where: { badgeType: 'challenge_completed', isActive: true },
+    });
+    if (!badge && prisma.badge?.create) {
+      badge = await prisma.badge.create({
+        data: {
+          name: 'Challenge Champion',
+          description: 'Completed a group challenge goal',
+          badgeType: 'challenge_completed',
+          iconUrl: 'trophy',
+          isActive: true,
+        },
+      });
+    }
+    if (badge) {
+      await BadgesLibrary.awardBadge(profileId, badge.BadgeID, 1);
+    }
+  } catch {
+    // Non-blocking: never break challenge progress if badge table is unavailable
+  }
+}
 
 function dayStart(value) {
   return argentinaDateToUtcMidnight(value);
@@ -362,6 +388,9 @@ async function getChallengeProgress(challengeId, profileId, clientDate) {
   const targetPercentage = challenge.targetPercentage || 100;
   const goalReached = percentage >= targetPercentage;
   const outcome = computeChallengeOutcome(status, percentage, targetPercentage);
+  if (goalReached) {
+    await awardChallengeCompletedBadge(profileId);
+  }
   return {
     challenge,
     completedDays: completions.length,
@@ -374,6 +403,7 @@ async function getChallengeProgress(challengeId, profileId, clientDate) {
     status,
     goalReached,
     outcome,
+    badgeEarned: goalReached,
   };
 }
 
@@ -407,6 +437,7 @@ async function getChallengeRanking(challengeId, requesterId) {
       targetPercentage,
       status,
       goalReached,
+      badgeEarned: goalReached,
       outcome: computeChallengeOutcome(status, percentage, targetPercentage),
     };
   });

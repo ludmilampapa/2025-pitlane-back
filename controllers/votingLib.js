@@ -501,10 +501,13 @@ async function completeVotingSession(votingSessionId, forcedWinnerProposalId = n
     }
 
     // If a forced winner (e.g. from Meal Roulette) is provided, crown that proposal directly
-    const parsedForcedId = forcedWinnerProposalId ? parseInt(forcedWinnerProposalId) : null;
+    const parsedForcedId = forcedWinnerProposalId ? parseInt(forcedWinnerProposalId, 10) : null;
     const forcedProposal = parsedForcedId
         ? votingSession.proposals.find((p) => p.MealProposalID === parsedForcedId)
         : null;
+    if (parsedForcedId && !forcedProposal) {
+        throw new Error('Selected winning proposal does not belong to this voting session');
+    }
 
     // Otherwise find the maximum vote count; on a tie, randomly draw among tied top proposals
     const maxVotes = Math.max(...votingSession.proposals.map((p) => p.voteCount || 0));
