@@ -294,17 +294,6 @@ router.put('/:id/preferences-and-restrictions', authenticateJWT, async (req, res
   }
 });
 
-// DELETE /profile/:id - delete a profile by id (protegido)
-router.delete('/:id', authenticateJWT, async (req, res) => {
-  try {
-    const deleted = await profilesController.deleteProfile(req.params.id);
-    if (!deleted) return res.status(404).json({ error: 'Profile not found' });
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // POST /profile - create a new profile (protegido)
 router.post('/', authenticateJWT, async (req, res) => {
   try {

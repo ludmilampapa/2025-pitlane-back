@@ -79,9 +79,13 @@ function createRateLimiter({ windowMs, max, methods }) {
   };
 }
 
-// General limit + a stricter one for state-changing requests
+// General limit + stricter limits for state-changing and sensitive requests
 app.use(createRateLimiter({ windowMs: 60 * 1000, max: 300 }));
 app.use(createRateLimiter({ windowMs: 60 * 1000, max: 90, methods: ['POST', 'PUT', 'PATCH', 'DELETE'] }));
+const sensitiveRateLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 20 });
+app.use('/profile/:id', (req, res, next) => (req.method === 'DELETE' ? sensitiveRateLimiter(req, res, next) : next()));
+app.use('/groups/:id/invite', sensitiveRateLimiter);
+app.use('/voting/check-transitions', sensitiveRateLimiter);
 
 // Strict CORS allowlist
 const envOrigins = (process.env.FRONTEND_URL || '')

@@ -301,3 +301,35 @@ describe('HTTP hardening (index.js)', () => {
       .expect(403);
   });
 });
+
+describe('sensitive routes hardening', () => {
+  test('DELETE /profile/:id is strictly self-only (even site admins cannot delete another user)', async () => {
+    asRole('admin');
+    await request(app).delete(`/profile/${OTHER}`).set('Authorization', userToken()).expect(403);
+  });
+
+  test('POST /consumptions/group rejects non-members at the guard level', async () => {
+    groupWith({ createdBy: OTHER, memberRole: null });
+    await request(app)
+      .post('/consumptions/group')
+      .set('Authorization', userToken())
+      .send({ name: 'Dinner', groupId: 1, meals: [{ mealId: 1, quantity: 1 }] })
+      .expect(403);
+  });
+
+  test('POST /foods rejects unsafe javascript: URLs in svgLink (XSS protection)', async () => {
+    await request(app)
+      .post('/foods')
+      .set('Authorization', userToken())
+      .send({ name: 'Evil Food', svgLink: 'javascript:alert(1)' })
+      .expect(400);
+  });
+
+  test('PUT /menu-proposals/:id/respond rejects invalid status values', async () => {
+    await request(app)
+      .put('/menu-proposals/1/respond')
+      .set('Authorization', userToken())
+      .send({ status: 'hacked' })
+      .expect(400);
+  });
+});
