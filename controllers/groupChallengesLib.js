@@ -22,8 +22,8 @@ async function awardChallengeCompletedBadge(profileId) {
     if (badge) {
       await BadgesLibrary.awardBadge(profileId, badge.BadgeID, 1);
     }
-  } catch {
-    // Non-blocking: never break challenge progress if badge table is unavailable
+  } catch (err) {
+    console.error('Error awarding challenge_completed badge:', err);
   }
 }
 
@@ -144,6 +144,26 @@ async function updateChallenge(challengeId, profileId, data) {
   const challenge = await prisma.groupChallenge.findUnique({ where: { ChallengeID: parseInt(challengeId) } });
   if (!challenge) throw new Error('CHALLENGE_NOT_FOUND');
   await requireAdmin(challenge.groupId, profileId);
+
+  const currentStatus = getChallengeLifecycleStatus(challenge, getArgentinaYMD(new Date()));
+  if (currentStatus === 'finished') {
+    throw new Error('CHALLENGE_LOCKED');
+  }
+  if (prisma.groupChallengeCompletion?.groupBy) {
+    const totalDays = daysBetween(challenge.startDate, challenge.endDate);
+    const targetPct = challenge.targetPercentage || 100;
+    const completionCounts = await prisma.groupChallengeCompletion.groupBy({
+      by: ['profileId'],
+      where: { challengeId: challenge.ChallengeID, completed: true },
+      _count: { _all: true },
+    });
+    const anyCompleted = completionCounts.some(
+      (c) => Math.round(((c._count?._all || 0) / totalDays) * 100) >= targetPct
+    );
+    if (anyCompleted) {
+      throw new Error('CHALLENGE_LOCKED');
+    }
+  }
   const startDate = data.startDate ? dayStart(data.startDate) : challenge.startDate;
   const endDate = data.endDate ? dayStart(data.endDate) : challenge.endDate;
   if (endDate < startDate) throw new Error('INVALID_CHALLENGE_DATES');
@@ -348,11 +368,23 @@ async function setCompletion(challengeId, profileId, dateValue, completed) {
   }
   const date = dayStart(dateValue || new Date());
   if (date < dayStart(challenge.startDate) || date > dayStart(challenge.endDate)) throw new Error('DATE_OUT_OF_CHALLENGE');
-  return prisma.groupChallengeCompletion.upsert({
+  const record = await prisma.groupChallengeCompletion.upsert({
     where: { challengeId_profileId_date: { challengeId: challenge.ChallengeID, profileId, date } },
     update: { completed: Boolean(completed) },
     create: { challengeId: challenge.ChallengeID, profileId, date, completed: Boolean(completed) },
   });
+  if (Boolean(completed) && prisma.groupChallengeCompletion?.count) {
+    const totalDays = daysBetween(challenge.startDate, challenge.endDate);
+    const targetPercentage = challenge.targetPercentage || 100;
+    const completedCount = await prisma.groupChallengeCompletion.count({
+      where: { challengeId: challenge.ChallengeID, profileId, completed: true },
+    });
+    const pct = totalDays ? Math.min(100, Math.round((completedCount * 100) / totalDays)) : 0;
+    if (pct >= targetPercentage) {
+      await awardChallengeCompletedBadge(profileId);
+    }
+  }
+  return record;
 }
 
 async function getChallengeProgress(challengeId, profileId, clientDate) {
@@ -442,6 +474,10 @@ async function getChallengeRanking(challengeId, requesterId) {
     };
   });
   ranking.sort((a, b) => b.percentage - a.percentage || b.completedDays - a.completedDays || a.username?.localeCompare(b.username || '') || 0);
+  const winners = ranking.filter((r) => r.goalReached);
+  if (winners.length > 0) {
+    await Promise.all(winners.map((w) => awardChallengeCompletedBadge(w.profileId)));
+  }
   return ranking;
 }
 

@@ -28,6 +28,7 @@ const respondProposalBodyRule = validateBody({
 function errorStatus(error) {
   if (['FORBIDDEN_MEMBERSHIP', 'FORBIDDEN_ADMIN'].includes(error.message)) return 403;
   if (['CHALLENGE_NOT_FOUND', 'MENU_ENTRY_NOT_FOUND', 'PROPOSAL_NOT_FOUND', 'MEAL_NOT_FOUND'].includes(error.message)) return 404;
+  if (error.message === 'CHALLENGE_LOCKED') return 409;
   if (error.message.startsWith('INVALID') || error.message === 'DATE_OUT_OF_CHALLENGE' || error.message === 'PROPOSAL_ALREADY_RESOLVED') return 400;
   return 500;
 }
