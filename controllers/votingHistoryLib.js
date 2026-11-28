@@ -8,8 +8,7 @@ async function getGroupVotingHistory(groupId, limit = 10, offset = 0) {
   const sessions = await prisma.votingSession.findMany({
     where: {
       groupId: parseInt(groupId),
-      status: 'completed',
-      winnerMealId: { not: null }
+      status: { in: ['completed', 'cancelled'] }
     },
     include: {
       winnerMeal: {
@@ -48,6 +47,12 @@ async function getGroupVotingHistory(groupId, limit = 10, offset = 0) {
       },
       proposals: {
         include: {
+          meal: {
+            select: {
+              MealID: true,
+              name: true
+            }
+          },
           proposedBy: {
             select: {
               id: true,
@@ -63,7 +68,7 @@ async function getGroupVotingHistory(groupId, limit = 10, offset = 0) {
       }
     },
     orderBy: {
-      completedAt: 'desc'
+      createdAt: 'desc'
     },
     skip: offset,
     take: limit
@@ -71,20 +76,41 @@ async function getGroupVotingHistory(groupId, limit = 10, offset = 0) {
 
   // Format the response
   const formattedSessions = sessions.map(session => {
-    const winningProposal = session.proposals?.find(p => p.mealId === session.winnerMealId);
+    const winningProposal = session.winnerMealId
+      ? session.proposals?.find(p => p.mealId === session.winnerMealId)
+      : null;
+    const totalVotes = session.proposals?.reduce((sum, p) => sum + (p.voteCount || 0), 0) || 0;
+    const isCancelled = session.status === 'cancelled' || !session.winnerMealId;
+    const isRoulette =
+      !isCancelled &&
+      (totalVotes === 0 || (session.description || '').toLowerCase().includes('roulette'));
+
     return {
       sessionId: session.VotingSessionID,
+      title: session.title || 'Group Vote',
       createdAt: session.createdAt,
       completedAt: session.completedAt,
-      status: session.status,
-      winnerMeal: {
-        mealId: session.winnerMeal?.MealID,
-        name: session.winnerMeal?.name,
-        voteCount: winningProposal?.voteCount || 0,
-        proposedById: winningProposal?.proposedById || winningProposal?.proposedBy?.id || null,
-        proposedByUsername: winningProposal?.proposedBy?.username || null
-      },
-      totalVotes: session.proposals?.reduce((sum, p) => sum + (p.voteCount || 0), 0) || 0,
+      status: isCancelled ? 'cancelled' : session.status,
+      gameMode: isCancelled ? 'expired' : isRoulette ? 'roulette' : 'classic',
+      cancelReason: isCancelled ? 'time_expired' : null,
+      winnerMeal: session.winnerMeal
+        ? {
+            mealId: session.winnerMeal.MealID,
+            name: session.winnerMeal.name,
+            voteCount: winningProposal?.voteCount || 0,
+            proposedById: winningProposal?.proposedById || winningProposal?.proposedBy?.id || null,
+            proposedByUsername: winningProposal?.proposedBy?.username || null
+          }
+        : null,
+      proposals: (session.proposals || []).map(p => ({
+        proposalId: p.MealProposalID,
+        mealId: p.mealId,
+        mealName: p.meal?.name || 'Dish',
+        proposedById: p.proposedById || p.proposedBy?.id || null,
+        proposedByUsername: p.proposedBy?.username || 'Member',
+        voteCount: p.voteCount || 0
+      })),
+      totalVotes,
       participantCount: session._count.participants,
       participantIds: session.participants?.map(p => p.userId) || [],
       initiatorId: session.initiator?.id || null,
