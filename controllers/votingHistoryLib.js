@@ -113,6 +113,9 @@ async function getGroupVotingHistory(groupId, limit = 10, offset = 0) {
       totalVotes,
       participantCount: session._count.participants,
       participantIds: session.participants?.map(p => p.userId) || [],
+      loggedUserIds: (session.participants || [])
+        .filter(p => p.hasSelectedPortion)
+        .map(p => p.userId),
       initiatorId: session.initiator?.id || null,
       initiatorUsername: session.initiator?.username || null
     };
@@ -313,26 +316,7 @@ async function updateParticipantDeadlines(sessionId) {
 async function selectMealPortion(sessionId, userId, portionData) {
   const { mealPortionFraction, foodPortions } = portionData;
 
-  // Get participant
-  const participant = await prisma.votingSessionParticipant.findUnique({
-    where: {
-      votingSessionId_userId: {
-        votingSessionId: parseInt(sessionId),
-        userId: userId
-      }
-    }
-  });
-
-  if (!participant) {
-    throw new Error('Participant not found');
-  }
-
-  // Check if deadline has passed
-  if (new Date() > participant.portionDeadline) {
-    throw new Error('Portion selection deadline has passed');
-  }
-
-  // Get session with winner meal
+  // Get session with winner meal first so we can auto-enroll group members (e.g. Roulette sessions)
   const session = await prisma.votingSession.findUnique({
     where: { VotingSessionID: parseInt(sessionId) },
     include: {
@@ -350,6 +334,36 @@ async function selectMealPortion(sessionId, userId, portionData) {
 
   if (!session || !session.winnerMealId) {
     throw new Error('No winner meal found');
+  }
+
+  let participant = await prisma.votingSessionParticipant.findUnique({
+    where: {
+      votingSessionId_userId: {
+        votingSessionId: parseInt(sessionId),
+        userId: userId
+      }
+    }
+  });
+
+  if (!participant) {
+    const membership = await prisma.groupMember.findFirst({
+      where: {
+        groupId: session.groupId,
+        profileId: userId
+      }
+    });
+    if (!membership) {
+      throw new Error('Participant not found');
+    }
+    participant = await prisma.votingSessionParticipant.create({
+      data: {
+        votingSessionId: parseInt(sessionId),
+        userId: userId,
+        portionDeadline: new Date(Date.now() + 15 * 60 * 1000)
+      }
+    });
+  } else if (new Date() > participant.portionDeadline) {
+    throw new Error('Portion selection deadline has passed');
   }
 
   // Find existing meal portion for this participant and meal
