@@ -118,6 +118,23 @@ async function main() {
     },
   });
 
+  const challengeChampionBadge = await prisma.badge.upsert({
+    where: { name: 'Challenge Champion' },
+    update: {
+      badgeType: 'challenge_completed',
+      description: 'Completed a group challenge goal',
+      requirements: 'Reach the goal percentage of a group challenge',
+    },
+    create: {
+      name: 'Challenge Champion',
+      description: 'Completed a group challenge goal',
+      badgeType: 'challenge_completed',
+      iconUrl: null,
+      requirements: 'Reach the goal percentage of a group challenge',
+      isActive: true,
+    },
+  });
+
   console.log('Badges created successfully!');
 }
 
